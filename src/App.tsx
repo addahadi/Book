@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import PdfPage from './reader/PdfPage';
+import PositionIndicator from './reader/PositionIndicator';
 import { usePdfDocument } from './reader/usePdfDocument';
 import { useReader } from './store/reader';
 import samplePdf from './assets/sample.pdf?url';
@@ -37,6 +38,10 @@ export default function App() {
   // ← / → keys turn pages. Bound once; the store reads live state.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Don't hijack arrows while typing in a field (e.g. go-to-page).
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
+        return;
       if (e.key === 'ArrowRight') nextPage();
       else if (e.key === 'ArrowLeft') prevPage();
     };
@@ -115,6 +120,9 @@ export default function App() {
           </>
         )}
       </main>
+      <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">
+        <PositionIndicator />
+      </footer>
     </div>
   );
 }
