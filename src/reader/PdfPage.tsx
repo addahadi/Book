@@ -44,7 +44,7 @@ export default function PdfPage({ doc, page }: Props) {
   return (
     <canvas
       ref={canvasRef}
-      className="max-h-full rounded shadow-lg ring-1 ring-black/10 dark:ring-white/10"
+      className="pdf-page max-h-full rounded shadow-lg ring-1 ring-black/10 dark:ring-white/10"
     />
   );
 }

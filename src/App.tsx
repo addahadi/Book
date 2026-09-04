@@ -3,6 +3,7 @@ import PdfPage from './reader/PdfPage';
 import PositionIndicator from './reader/PositionIndicator';
 import { usePdfDocument } from './reader/usePdfDocument';
 import { useReader } from './store/reader';
+import { useTheme } from './store/theme';
 import samplePdf from './assets/sample.pdf?url';
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
@@ -14,6 +15,7 @@ export default function App() {
   const { currentPage, numPages, spread, setNumPages, setSpread, nextPage, prevPage } =
     useReader();
   const { doc, error } = usePdfDocument(samplePdf);
+  const { theme, toggle: toggleTheme } = useTheme();
   const touchStartX = useRef<number | null>(null);
 
   const atStart = currentPage <= 1;
@@ -72,10 +74,20 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
+    <div className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100">
       <header className="flex items-center justify-between border-b border-black/10 px-4 py-2 text-sm dark:border-white/10">
         <span className="font-semibold">Reading Stage</span>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-pressed={theme === 'dark'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to night mode'}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to night mode'}
+            className="rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
           <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
             page {currentPage}
             {rightPage ? `–${rightPage}` : ''}

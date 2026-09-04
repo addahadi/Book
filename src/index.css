@@ -11,3 +11,13 @@ body,
 body {
   margin: 0;
 }
+
+/*
+ * Warm night mode for the rendered page. Invert so the white page becomes dark
+ * and the text light, then hue-rotate to keep coloured content's hue, and add a
+ * touch of sepia + slightly lower brightness so it reads warm — not a harsh
+ * pure-white inversion. Applied only to the PDF canvas; chrome uses the palette.
+ */
+.dark .pdf-page {
+  filter: invert(0.9) hue-rotate(180deg) sepia(0.18) brightness(0.92) contrast(0.95);
+}
