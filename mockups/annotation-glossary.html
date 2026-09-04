@@ -1,0 +1,148 @@
+<title>Annotation Vocabulary</title>
+<style>
+  :root {
+    --ground: #ded6c4;
+    --paper: #ece6d8;
+    --paper-edge: #d8cfba;
+    --ink: #2b2a26;
+    --ink-soft: #6b6656;
+    --ink-faint: #9a927f;
+    --accent: #3e4c63;
+    --accent-soft: #8b93a6;
+    --card: #f3eee2;
+    --border: rgba(43,42,38,0.14);
+    --hl-yellow: rgba(224, 196, 96, 0.5);
+    --hl-blue: rgba(120, 156, 196, 0.42);
+    --hl-pink: rgba(206, 128, 140, 0.4);
+    --note: #e8dcbf;
+    --ink-pen: #384a6b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131210;
+      --paper: #1c1b18;
+      --paper-edge: #262420;
+      --ink: #d8d2c4;
+      --ink-soft: #9a9382;
+      --ink-faint: #6a6456;
+      --accent: #9aa6c2;
+      --accent-soft: #565f74;
+      --card: #211f1b;
+      --border: rgba(216,210,196,0.14);
+      --hl-yellow: rgba(224, 196, 96, 0.32);
+      --hl-blue: rgba(120, 156, 196, 0.3);
+      --hl-pink: rgba(206, 128, 140, 0.3);
+      --note: #34301f;
+      --ink-pen: #9fb0d6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; padding: clamp(20px,4vw,48px) 16px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  .eyebrow { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  h1 { font-family: Charter, Georgia, serif; font-size: clamp(26px,4vw,36px); margin: 6px 0 8px; text-wrap: balance; }
+  .lede { color: var(--ink-soft); max-width: 60ch; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: 18px; margin-top: 28px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 20px 22px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .card h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; padding: 3px 7px; border-radius: 20px; }
+  .tag.v1 { background: rgba(90,140,90,0.18); color: #4a7a4a; }
+  .tag.later { background: rgba(150,120,60,0.16); color: #8a6a2a; }
+  .tag.scan { background: rgba(62,76,99,0.14); color: var(--accent); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .tag.v1 { color: #8fc98f; }
+    :root:not([data-theme="light"]) .tag.later { color: #d3ad63; }
+  }
+  .card p { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+  /* the little page sample */
+  .sample {
+    background: var(--paper); border: 1px solid var(--paper-edge); border-radius: 6px;
+    padding: 16px 16px; font-family: Charter, Georgia, serif; font-size: 13px; line-height: 1.75;
+    color: var(--ink); position: relative; min-height: 118px; overflow: visible;
+  }
+  .sample .txt { max-width: 40ch; }
+  mark.y { background: var(--hl-yellow); border-radius: 2px; }
+  mark.b { background: var(--hl-blue); border-radius: 2px; }
+  mark.p { background: var(--hl-pink); border-radius: 2px; }
+  .under { border-bottom: 2px solid var(--accent); }
+  .strike { text-decoration: line-through; text-decoration-color: var(--ink-pen); opacity: 0.7; }
+  /* margin note bubble */
+  .note-bubble {
+    position: absolute; right: 8px; top: 12px; width: 92px;
+    background: var(--note); border-radius: 6px; padding: 7px 9px;
+    font-family: "Segoe Print","Bradley Hand",cursive; font-size: 11px; color: var(--ink);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.12); line-height: 1.35;
+    transform: rotate(1.5deg);
+  }
+  .note-anchor { background: var(--hl-yellow); border-radius: 2px; }
+  /* dog ear */
+  .dogear { position: absolute; top: 0; right: 0; width: 0; height: 0;
+    border-left: 26px solid transparent; border-top: 26px solid var(--accent); border-radius: 0 6px 0 0; opacity: 0.85; }
+  .ribbon { position: absolute; top: -1px; right: 22px; width: 12px; height: 44px; background: var(--hl-pink); border-radius: 0 0 3px 3px; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+  /* freehand */
+  .ink-svg { position: absolute; inset: 0; pointer-events: none; }
+  .ink-svg path, .ink-svg ellipse { stroke: var(--ink-pen); fill: none; stroke-width: 2; stroke-linecap: round; }
+  /* region box */
+  .region { position: absolute; left: 14px; top: 44px; width: 150px; height: 46px; border: 2px solid var(--accent); border-radius: 3px; background: rgba(62,76,99,0.08); }
+  .region-label { position: absolute; left: 14px; top: 30px; font-size: 9px; letter-spacing:0.06em; text-transform: uppercase; color: var(--accent); font-family: sans-serif; }
+  .note-btn { background: var(--ground); color: var(--ink); border:1px solid var(--border); border-radius:6px; padding:6px 12px; font: inherit; font-size:12px; cursor:pointer; margin-top:4px; }
+  .themebtn { position: fixed; top: 14px; right: 16px; background: var(--card); color: var(--ink-soft); border:1px solid var(--border); border-radius:7px; padding:7px 12px; font:inherit; font-size:12px; cursor:pointer; }
+</style>
+
+<button class="themebtn" onclick="const d=document.documentElement;d.setAttribute('data-theme',d.getAttribute('data-theme')==='dark'?'light':'dark')">Toggle day / night</button>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Shared vocabulary</div>
+    <h1>The marks you can leave on a page</h1>
+    <p class="lede">Each card is one kind of annotation, drawn on a sample page so we mean the same thing when we name it. The badge says whether I'd put it in <b>v1</b>, push it to <b>later</b>, or note it's the <b>scan fallback</b>.</p>
+  </header>
+
+  <div class="grid">
+
+    <div class="card">
+      <h3>Highlight <span class="tag v1">v1</span></h3>
+      <div class="sample"><div class="txt">The mind that is <mark class="y">anxious about future events</mark> is miserable, since it suffers <mark class="b">before</mark> the misfortune arrives.</div></div>
+      <p>Colour a run of <b>selected text</b>. Multiple colours = multiple meanings (e.g. yellow = key idea, blue = disagree). Needs a text layer.</p>
+    </div>
+
+    <div class="card">
+      <h3>Underline &amp; strikethrough <span class="tag v1">v1</span></h3>
+      <div class="sample"><div class="txt">He <span class="under">who fears death</span> will never do anything worthy of a living man. <span class="strike">Delete this weak clause.</span></div></div>
+      <p>Same engine as highlight, different look. Underline to emphasise; strikethrough to mark text you reject. Cheap once highlight exists.</p>
+    </div>
+
+    <div class="card">
+      <h3>Margin note <span class="tag v1">v1</span></h3>
+      <div class="sample"><div class="txt">The whole future is <span class="note-anchor">uncertain</span>: live immediately, for tomorrow is not owed to you.</div><div class="note-bubble">cf. Seneca — same idea, letter 101</div></div>
+      <p>A <b>written note attached to a spot or a highlight</b>. Shown in the margin (or a pop-up when you tap the anchor). This is your "marginalia" — thinking <i>alongside</i> the text.</p>
+    </div>
+
+    <div class="card">
+      <h3>Bookmark / dog-ear <span class="tag v1">v1</span></h3>
+      <div class="sample"><div class="dogear"></div><div class="ribbon"></div><div class="txt">Chapter IV — On the shortness of life. A page you want to return to with one tap.</div></div>
+      <p>Mark a <b>whole page</b> to jump back to later — like folding a corner (dog-ear) or a ribbon. A named list of these = your "jump back to" menu.</p>
+    </div>
+
+    <div class="card">
+      <h3>Freehand ink <span class="tag later">later</span></h3>
+      <div class="sample"><svg class="ink-svg" viewBox="0 0 240 118" preserveAspectRatio="none"><ellipse cx="70" cy="34" rx="52" ry="16"/><path d="M150 70 q30 -20 70 -6"/><path d="M150 70 l14 -4 M150 70 l4 -12"/></svg><div class="txt">Draw anywhere with a pen or finger — circle a word, scrawl an arrow, sketch a diagram in the margin.</div></div>
+      <p>Free drawing over the page. Works even on <b>scanned</b> books. But it's a whole separate input system (pen pressure, eraser, touch) — I'd defer it.</p>
+    </div>
+
+    <div class="card">
+      <h3>Region highlight <span class="tag scan">scan fallback</span></h3>
+      <div class="sample"><span class="region-label">boxed area</span><div class="region"></div><div class="txt">For scanned books with no text layer, you can't select words — so you draw a <b>box</b> around part of the image instead.</div></div>
+      <p>A rectangle over an <b>image region</b> — the only way to "highlight" a scanned page. Lets scanned books still get marks &amp; notes, minus true text selection.</p>
+    </div>
+
+  </div>
+</div>

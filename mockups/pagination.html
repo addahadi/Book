@@ -1,0 +1,386 @@
+<title>The Reading Stage</title>
+<style>
+  :root {
+    /* light / paper */
+    --ground: #ded6c4;
+    --paper: #ece6d8;
+    --paper-edge: #d8cfba;
+    --ink: #2b2a26;
+    --ink-soft: #6b6656;
+    --ink-faint: #9a927f;
+    --accent: #3e4c63;
+    --accent-soft: #8b93a6;
+    --spine: rgba(43, 42, 38, 0.14);
+    --page-shadow: rgba(43, 42, 38, 0.18);
+    --chip: rgba(62, 76, 99, 0.10);
+    --ui-bg: rgba(236, 230, 216, 0.7);
+    --ui-border: rgba(43, 42, 38, 0.14);
+    --highlight: rgba(214, 178, 92, 0.42);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131210;
+      --paper: #1c1b18;
+      --paper-edge: #262420;
+      --ink: #d8d2c4;
+      --ink-soft: #9a9382;
+      --ink-faint: #6a6456;
+      --accent: #9aa6c2;
+      --accent-soft: #565f74;
+      --spine: rgba(0, 0, 0, 0.45);
+      --page-shadow: rgba(0, 0, 0, 0.5);
+      --chip: rgba(154, 166, 194, 0.14);
+      --ui-bg: rgba(28, 27, 24, 0.75);
+      --ui-border: rgba(216, 210, 196, 0.14);
+      --highlight: rgba(214, 178, 92, 0.28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #131210;
+    --paper: #1c1b18;
+    --paper-edge: #262420;
+    --ink: #d8d2c4;
+    --ink-soft: #9a9382;
+    --ink-faint: #6a6456;
+    --accent: #9aa6c2;
+    --accent-soft: #565f74;
+    --spine: rgba(0, 0, 0, 0.45);
+    --page-shadow: rgba(0, 0, 0, 0.5);
+    --chip: rgba(154, 166, 194, 0.14);
+    --ui-bg: rgba(28, 27, 24, 0.75);
+    --ui-border: rgba(216, 210, 196, 0.14);
+    --highlight: rgba(214, 178, 92, 0.28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: background 0.4s ease, color 0.4s ease;
+  }
+
+  /* ---- top bar ---- */
+  .topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px clamp(16px, 4vw, 40px);
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    background: var(--ui-bg);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--ui-border);
+    z-index: 5;
+  }
+  .brand {
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+  .brand b { color: var(--ink); font-weight: 700; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+    background: transparent;
+    border: 1px solid var(--ui-border);
+    border-radius: 7px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+  .btn:hover { color: var(--ink); border-color: var(--accent-soft); }
+  .btn.active { color: var(--accent); border-color: var(--accent); background: var(--chip); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- stage ---- */
+  .stage {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(20px, 4vw, 48px) 16px;
+    position: relative;
+  }
+
+  .book {
+    display: flex;
+    gap: 0;
+    max-width: 1040px;
+    width: 100%;
+    filter: drop-shadow(0 18px 40px var(--page-shadow));
+    position: relative;
+  }
+  .book.single { max-width: 560px; }
+
+  .leaf {
+    background: var(--paper);
+    flex: 1 1 0;
+    min-width: 0;
+    padding: clamp(30px, 4.5vw, 58px) clamp(26px, 4vw, 52px);
+    min-height: min(72vh, 720px);
+    position: relative;
+    transition: background 0.4s ease;
+  }
+  .leaf.left  { border-radius: 4px 0 0 4px; box-shadow: inset -22px 0 26px -22px var(--spine); }
+  .leaf.right { border-radius: 0 4px 4px 0; box-shadow: inset  22px 0 26px -22px var(--spine); }
+  .book.single .leaf { border-radius: 4px; box-shadow: none; }
+  /* the spine */
+  .book:not(.single)::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--spine);
+    z-index: 2;
+  }
+  .leaf.hidden { display: none; }
+
+  /* page text */
+  .page-body {
+    font-family: Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: clamp(15px, 1.15vw, 17.5px);
+    line-height: 1.72;
+    color: var(--ink);
+    max-width: 62ch;
+    margin: 0 auto;
+    animation: fade 0.35s ease;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .page-body { animation: none; }
+    * { transition: none !important; }
+  }
+  .page-body h2 {
+    font-size: 1.02em;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 600;
+    margin: 0 0 1.4em;
+  }
+  .page-body p { margin: 0 0 1.1em; text-align: justify; hyphens: auto; }
+  .page-body .drop::first-letter {
+    font-size: 3.1em;
+    line-height: 0.82;
+    float: left;
+    padding: 0.04em 0.09em 0 0;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  mark { background: var(--highlight); color: inherit; padding: 0 1px; border-radius: 2px; }
+
+  .folio {
+    position: absolute;
+    bottom: clamp(16px, 2.5vw, 28px);
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+  }
+  .leaf.left  .folio { left: clamp(26px, 4vw, 52px); }
+  .leaf.right .folio { right: clamp(26px, 4vw, 52px); }
+  .book.single .folio { left: 50%; transform: translateX(-50%); }
+
+  /* click zones */
+  .turnzone {
+    position: absolute; top: 0; bottom: 0; width: 22%;
+    z-index: 3; cursor: pointer; border: 0; background: transparent;
+    display: flex; align-items: center; opacity: 0; transition: opacity 0.2s;
+  }
+  .turnzone:hover { opacity: 1; }
+  .turnzone.prev { left: 0; justify-content: flex-start; padding-left: 10px; }
+  .turnzone.next { right: 0; justify-content: flex-end; padding-right: 10px; }
+  .turnzone span {
+    font-size: 26px; color: var(--accent);
+    background: var(--ui-bg); border-radius: 50%;
+    width: 40px; height: 40px; display: grid; place-items: center;
+  }
+
+  /* ---- sense-of-place footer ---- */
+  .place {
+    width: 100%;
+    max-width: 1040px;
+    padding: 0 16px clamp(24px, 4vw, 40px);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .place-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .place-label {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .place-count {
+    font-size: 14px; color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .place-count b { color: var(--ink); font-weight: 700; }
+
+  /* the two hands */
+  .hands {
+    display: flex;
+    height: 26px;
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid var(--ui-border);
+    background: var(--paper-edge);
+  }
+  .hand {
+    background:
+      repeating-linear-gradient(90deg,
+        var(--paper) 0, var(--paper) 1px,
+        var(--paper-edge) 1px, var(--paper-edge) 3px);
+    transition: flex-basis 0.4s cubic-bezier(.4,0,.2,1);
+    position: relative;
+  }
+  .hand.read  { border-right: 2px solid var(--accent); }
+  .hand.left-label::after, .hand.right-label::after {
+    position: absolute; bottom: 100%; margin-bottom: 4px;
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .caption {
+    font-size: 12.5px; color: var(--ink-faint); line-height: 1.5;
+    max-width: 70ch;
+  }
+  .caption b { color: var(--ink-soft); font-weight: 600; }
+</style>
+
+<div class="topbar">
+  <div class="brand"><b>READING</b> STAGE · concept</div>
+  <div class="controls">
+    <button class="btn" id="modeBtn">Single page</button>
+    <button class="btn" id="themeBtn">Night</button>
+  </div>
+</div>
+
+<div class="stage">
+  <button class="turnzone prev" id="zPrev" aria-label="Previous page"><span>‹</span></button>
+  <div class="book" id="book">
+    <div class="leaf left"><div class="page-body" id="leafL"></div><div class="folio" id="folioL"></div></div>
+    <div class="leaf right"><div class="page-body" id="leafR"></div><div class="folio" id="folioR"></div></div>
+  </div>
+  <button class="turnzone next" id="zNext" aria-label="Next page"><span>›</span></button>
+</div>
+
+<div class="place">
+  <div class="place-row">
+    <span class="place-label">Where you are</span>
+    <span class="place-count">Page <b id="pgNow">1</b> of <span id="pgTotal">320</span> · <span id="pctLeft"></span></span>
+  </div>
+  <div class="hands" id="hands" title="How the book sits in your hands">
+    <div class="hand read" id="handRead"></div>
+    <div class="hand rest" id="handRest"></div>
+  </div>
+  <p class="caption">
+    The <b>left block</b> is what's behind you (in your left hand); the <b>right block</b> is what's still to come.
+    That's the sense of place a scroll bar can't give — you <b>feel</b> the weight shift as you read.
+    Turn pages with <b>← →</b> arrows, by <b>clicking the edges</b>, or the buttons above. Notice the highlight on page 3 — that's an annotation anchored to its spot.
+  </p>
+</div>
+
+<script>
+  // A few real pages of public-domain text (Marcus Aurelius, Meditations)
+  const PAGES = [
+    {h: "MEDITATIONS · BOOK II", drop: true, html:
+      `<p class="drop">Begin the morning by saying to thyself, I shall meet with the busy-body, the ungrateful, arrogant, deceitful, envious, unsocial. All these things happen to them by reason of their ignorance of what is good and evil.</p>
+       <p>But I who have seen the nature of the good that it is beautiful, and of the bad that it is ugly, and the nature of him who does wrong, that it is akin to me — I can neither be injured by any of them, for no one can fix on me what is ugly, nor can I be angry with my kinsman, nor hate him.</p>
+       <p>For we are made for co-operation, like feet, like hands, like eyelids, like the rows of the upper and lower teeth. To act against one another then is contrary to nature; and it is acting against one another to be vexed and to turn away.</p>`},
+    {h: null, html:
+      `<p>Whatever this is that I am, it is a little flesh and breath, and the ruling part. Throw away thy books; no longer distract thyself: it is not allowed; but as if thou wast now dying, despise the flesh; it is blood and bones and a network.</p>
+       <p>And the breath, what is it? Air, and not always the same, but every moment sent out and again sucked in. The third then is the ruling part: consider thus. Thou art an old man; no longer let this be a slave.</p>
+       <p>No longer let it be pulled by the strings of selfish desire, no longer be either dissatisfied with thy present lot, or shrink from the future.</p>`},
+    {h: null, html:
+      `<p>All that is from the gods is full of Providence. That which is from fortune is not separated from nature, or without an interweaving and involution with the things which are ordered by Providence.</p>
+       <p><mark>From thence all things flow; and there is besides necessity, and that which is for the advantage of the whole universe, of which thou art a part.</mark></p>
+       <p>But that is good for every part of nature which the nature of the whole brings, and what serves to maintain this nature. Now the universe is preserved by the changes of the elements.</p>`},
+    {h: null, html:
+      `<p>Let these principles be enough for thee; let them always be fixed opinions. But throw away the thirst after books, that thou mayest not die murmuring, but cheerfully, truly, and from thy heart thankful to the gods.</p>
+       <p>Remember how long thou hast been putting off these things, and how often thou hast received an opportunity from the gods, and yet dost not use it.</p>
+       <p>Thou must now at last perceive of what universe thou art a part, and of what administrator of the universe thy existence is an efflux.</p>`},
+    {h: "MEDITATIONS · BOOK III", drop: true, html:
+      `<p class="drop">We ought to consider not only that our life is daily wasting away and a smaller part of it is left, but another thing also must be taken into the account.</p>
+       <p>If a man should live longer, it is quite uncertain whether the understanding will still continue sufficient for the comprehension of things, and retain the power of contemplation.</p>
+       <p>We ought therefore to make haste, not only because we are daily nearer to death, but also because the conception of things and the understanding of them cease first.</p>`},
+    {h: null, html:
+      `<p>Do not act as if thou wert going to live ten thousand years. Death hangs over thee. While thou livest, while it is in thy power, be good.</p>
+       <p>Let it make no difference to thee whether thou art cold or warm, if thou art doing thy duty; and whether thou art drowsy or satisfied with sleep; and whether ill spoken of or praised.</p>
+       <p>Nothing is more wretched than a man who traverses everything in a round, and pries into the things beneath the earth, and conjectures at what is in the minds of his neighbours.</p>`},
+  ];
+
+  const TOTAL = 320;           // pretend the book is 320 pages
+  const OFFSET = 87;           // so "page 1 of demo" shows as page 88 of 320
+  let idx = 0;                 // index into PAGES (left page in spread)
+  let spread = true;
+
+  const $ = id => document.getElementById(id);
+
+  function renderPage(el, folioEl, i) {
+    const p = PAGES[i];
+    if (!p) { el.innerHTML = ""; folioEl.textContent = ""; el.closest(".leaf").classList.add("blank"); return; }
+    el.innerHTML = (p.h ? `<h2>${p.h}</h2>` : "") + p.html;
+    folioEl.textContent = OFFSET + i + 1;
+  }
+
+  function render() {
+    const book = $("book");
+    if (spread) {
+      book.classList.remove("single");
+      $("leafR").closest(".leaf").classList.remove("hidden");
+      renderPage($("leafL"), $("folioL"), idx);
+      renderPage($("leafR"), $("folioR"), idx + 1);
+    } else {
+      book.classList.add("single");
+      $("leafR").closest(".leaf").classList.add("hidden");
+      renderPage($("leafL"), $("folioL"), idx);
+    }
+    const shown = OFFSET + idx + 1;
+    $("pgNow").textContent = shown;
+    $("pgTotal").textContent = TOTAL;
+    const pct = Math.round((shown / TOTAL) * 100);
+    $("pctLeft").textContent = pct + "% in";
+    $("handRead").style.flexBasis = pct + "%";
+    $("handRest").style.flexBasis = (100 - pct) + "%";
+  }
+
+  function step(d) {
+    const inc = spread ? 2 : 1;
+    idx = Math.max(0, Math.min(PAGES.length - (spread ? 2 : 1), idx + d * inc));
+    render();
+  }
+
+  $("zNext").onclick = () => step(1);
+  $("zPrev").onclick = () => step(-1);
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight") step(1);
+    if (e.key === "ArrowLeft") step(-1);
+  });
+  $("modeBtn").onclick = () => {
+    spread = !spread;
+    $("modeBtn").textContent = spread ? "Single page" : "Two-page spread";
+    render();
+  };
+  $("themeBtn").onclick = () => {
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+    $("themeBtn").textContent = dark ? "Night" : "Day";
+  };
+
+  render();
+</script>

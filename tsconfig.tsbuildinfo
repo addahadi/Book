@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/db/db.ts","./src/reader/pdfcanvas.tsx","./src/reader/pdf.ts","./src/store/reader.ts"],"version":"5.9.3"}
