@@ -11,7 +11,10 @@ export type PdfPage = pdfjsLib.PDFPageProxy;
 export async function loadDocument(
   src: string | ArrayBuffer | Uint8Array,
 ): Promise<PdfDocument> {
-  const params =
-    typeof src === 'string' ? { url: src } : { data: src };
-  return pdfjsLib.getDocument(params).promise;
+  if (typeof src === 'string') return pdfjsLib.getDocument({ url: src }).promise;
+  // pdf.js transfers a passed buffer to its worker, detaching it — a second
+  // load of the same bytes (StrictMode remount, reopening a book) would then
+  // fail. Hand it a fresh copy each time so the caller keeps its bytes usable.
+  const data = src instanceof Uint8Array ? src.slice() : new Uint8Array(src.slice(0));
+  return pdfjsLib.getDocument({ data }).promise;
 }
