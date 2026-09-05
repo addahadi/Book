@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import PdfPage from './PdfPage';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PdfPage, { type Selection } from './PdfPage';
 import PositionIndicator from './PositionIndicator';
+import SelectionMenu from './SelectionMenu';
 import { usePdfDocument } from './usePdfDocument';
 import { getBook, saveBookPosition } from '../db/library';
+import { addAnnotation, listAnnotations, removeAnnotation } from '../db/annotations';
+import { UNDERLINE_COLOR, STRIKE_COLOR } from './marks';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
-import type { TextAnchor } from '../types';
+import type { Annotation, AnnotationType } from '../types';
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
@@ -24,32 +27,6 @@ function bandIndexOf(tops: number[], offset: number): number {
   let idx = 0;
   for (let i = 0; i < tops.length; i++) if (tops[i] <= offset + 1e-6) idx = i;
   return idx;
-}
-
-// The last selection made in a book, remembered across reloads (issue #08 spike).
-// This is deliberately a lightweight demo of the anchor round-trip, not the real
-// annotation model — persistent highlights arrive with #09. One record per book.
-type SavedSelection = { page: number; anchor: TextAnchor };
-
-function selKey(bookId: string) {
-  return `reading-stage:selection:${bookId}`;
-}
-
-function readSelection(bookId: string): SavedSelection | null {
-  try {
-    const raw = localStorage.getItem(selKey(bookId));
-    return raw ? (JSON.parse(raw) as SavedSelection) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSelection(bookId: string, sel: SavedSelection) {
-  try {
-    localStorage.setItem(selKey(bookId), JSON.stringify(sel));
-  } catch {
-    /* storage unavailable (private mode) — the selection just won't survive. */
-  }
 }
 
 // The paginated reader for one open book. A page is fit to the viewport width;
@@ -86,26 +63,74 @@ export default function Reader({ bookId }: { bookId: string }) {
   const posRef = useRef({ currentPage, pageOffset, resumed });
   posRef.current = { currentPage, pageOffset, resumed };
 
-  // The last text selection made in this book (issue #08 spike). Loaded from
-  // localStorage on open; re-bound on the page it was made on to demonstrate the
-  // anchor round-trips across a reload.
-  const [savedSel, setSavedSel] = useState<SavedSelection | null>(null);
+  // The annotation sidecar for this book (issue #09), loaded from IndexedDB on
+  // open and kept in memory. Marks for the current page are painted by PdfPage;
+  // the PDF bytes are never touched.
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   useEffect(() => {
-    setSavedSel(readSelection(bookId));
+    let cancelled = false;
+    setAnnotations([]);
+    listAnnotations(bookId).then((a) => !cancelled && setAnnotations(a));
+    return () => {
+      cancelled = true;
+    };
   }, [bookId]);
-  const restoreAnchor =
-    savedSel && savedSel.page === currentPage ? savedSel.anchor : null;
-
-  const onSelect = useCallback(
-    (anchor: TextAnchor | null) => {
-      if (!anchor) return;
-      const page = useReader.getState().currentPage;
-      const sel = { page, anchor };
-      writeSelection(bookId, sel);
-      setSavedSel(sel);
-    },
-    [bookId],
+  const pageAnnotations = useMemo(
+    () => annotations.filter((a) => a.page === currentPage),
+    [annotations, currentPage],
   );
+
+  // A live selection awaiting a mark choice, and an existing mark awaiting a
+  // remove confirmation — the two floating menus. Both carry the on-screen rect
+  // they anchor to.
+  const [pendingSel, setPendingSel] = useState<Selection | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; rect: DOMRect } | null>(null);
+
+  const onSelect = useCallback((selection: Selection | null) => {
+    setPendingRemove(null);
+    setPendingSel(selection);
+  }, []);
+
+  const onMarkClick = useCallback((id: string, rect: DOMRect) => {
+    setPendingSel(null);
+    setPendingRemove({ id, rect });
+  }, []);
+
+  // Apply a mark to the pending selection: highlight in a colour, or underline /
+  // strike through the same run via the shared anchoring engine.
+  const createMark = useCallback(
+    (type: AnnotationType, color?: string) => {
+      if (!pendingSel) return;
+      const mark: Annotation = {
+        id: crypto.randomUUID(),
+        bookId,
+        type,
+        page: currentPage,
+        anchor: pendingSel.anchor,
+        color,
+        createdAt: Date.now(),
+        tags: [],
+        links: [],
+      };
+      addAnnotation(mark).catch(() => {});
+      setAnnotations((prev) => [...prev, mark]);
+      window.getSelection()?.removeAllRanges();
+      setPendingSel(null);
+    },
+    [pendingSel, bookId, currentPage],
+  );
+
+  const removeMark = useCallback((id: string) => {
+    removeAnnotation(id).catch(() => {});
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setPendingRemove(null);
+  }, []);
+
+  // A turn (page or band) moves the text out from under the menus — dismiss them.
+  useEffect(() => {
+    setPendingSel(null);
+    setPendingRemove(null);
+  }, [currentPage, pageOffset]);
 
   // Load this book's bytes and restore its saved position (issue #07) so every
   // book reopens exactly where you left off; a never-opened book resumes at
@@ -232,8 +257,14 @@ export default function Reader({ bookId }: { bookId: string }) {
   }, [nextPage, prevPage]);
 
   // Click/tap the left or right half of the reading surface to turn. A click
-  // that ends a text selection must not also turn the page (issue #08).
+  // that ends a text selection must not also turn the page (issue #08); a click
+  // while a menu is open just dismisses it (issue #09).
   const onSurfaceClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (pendingSel || pendingRemove) {
+      setPendingSel(null);
+      setPendingRemove(null);
+      return;
+    }
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     const { left, width: w } = e.currentTarget.getBoundingClientRect();
@@ -331,14 +362,26 @@ export default function Reader({ bookId }: { bookId: string }) {
                 doc={doc}
                 page={currentPage}
                 width={width}
+                annotations={pageAnnotations}
                 onHeight={onHeight}
-                restoreAnchor={restoreAnchor}
                 onSelect={onSelect}
+                onMarkClick={onMarkClick}
               />
             </div>
           </div>
         )}
       </main>
+      {pendingSel && (
+        <SelectionMenu
+          rect={pendingSel.rect}
+          onHighlight={(color) => createMark('highlight', color)}
+          onUnderline={() => createMark('underline', UNDERLINE_COLOR)}
+          onStrike={() => createMark('strike', STRIKE_COLOR)}
+        />
+      )}
+      {pendingRemove && (
+        <SelectionMenu rect={pendingRemove.rect} onRemove={() => removeMark(pendingRemove.id)} />
+      )}
       <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">
         <PositionIndicator />
       </footer>

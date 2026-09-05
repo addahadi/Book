@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TextLayer, type PdfDocument, type TextLayerInstance } from './pdf';
-import type { TextAnchor } from '../types';
+import type { Annotation, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
+import { markRectStyle, type MarkRect } from './marks';
+
+// A user selection resolved to an anchor plus its on-screen rect (for the menu).
+export type Selection = { anchor: TextAnchor; rect: DOMRect };
 
 type Props = {
   /** Loaded document to render from, or null while it loads. */
@@ -10,37 +14,47 @@ type Props = {
   page: number;
   /** CSS width (px) to render the page at — the page is fit to this width. */
   width: number;
+  /** Marks anchored to this page, re-rendered over the text (issue #09). */
+  annotations: Annotation[];
   /** Reports the page's rendered CSS height once drawn, so the parent can
       compute how many bands it takes and clamp the last one. */
   onHeight?: (heightCss: number) => void;
-  /** A saved selection to re-bind once the text layer (re)renders — proves an
-      anchor round-trips across reload and survives re-render/zoom (issue #08). */
-  restoreAnchor?: TextAnchor | null;
-  /** Fired when the reader finishes a selection on this page (null if it can't
-      be anchored). Only user pointer selections report; restores stay silent. */
-  onSelect?: (anchor: TextAnchor | null) => void;
+  /** Fired on pointer-up: a resolved selection to mark up, or null to dismiss. */
+  onSelect?: (selection: Selection | null) => void;
+  /** Fired when an existing mark is clicked, with its on-screen rect. */
+  onMarkClick?: (id: string, rect: DOMRect) => void;
 };
 
+type RenderedMark = { id: string; type: Annotation['type']; color?: string; rects: MarkRect[] };
+
 // Renders a whole PDF page to a canvas at a given CSS width (fit-width), with a
-// pdf.js text layer aligned over it for selection. The canvas backing store is
-// drawn at device resolution so text stays crisp on HiDPI screens; the text
-// layer is laid out in CSS pixels (via `--scale-factor`) so its glyph boxes sit
-// exactly over the painted glyphs. The parent clips this to the viewport and
-// slides it up to reveal one band of the page at a time.
-export default function PdfPage({ doc, page, width, onHeight, restoreAnchor, onSelect }: Props) {
+// pdf.js text layer aligned over it for selection, and a mark layer over that
+// painting persisted highlights / underlines / strikes. The canvas backing
+// store is drawn at device resolution for crisp text; the text and mark layers
+// are laid out in CSS pixels so they sit exactly over the painted glyphs. The
+// parent clips this to the viewport and slides it up to reveal one band.
+export default function PdfPage({
+  doc,
+  page,
+  width,
+  annotations,
+  onHeight,
+  onSelect,
+  onMarkClick,
+}: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
-  const indexRef = useRef<PageTextIndex | null>(null);
-  // Read the latest restore anchor without making it a render dependency, so a
-  // new selection (which updates the prop) never forces a canvas re-render.
-  const restoreRef = useRef(restoreAnchor);
-  restoreRef.current = restoreAnchor;
+  // The offset index for the currently rendered layer. In state (not a ref) so
+  // the mark layer re-derives its rects once the text layer is ready.
+  const [index, setIndex] = useState<PageTextIndex | null>(null);
+  const [marks, setMarks] = useState<RenderedMark[]>([]);
 
   useEffect(() => {
     if (!doc || width <= 0) return;
     let cancelled = false;
     let textLayer: TextLayerInstance | null = null;
-    indexRef.current = null;
+    setIndex(null);
 
     (async () => {
       const pdfPage = await doc.getPage(page);
@@ -89,22 +103,7 @@ export default function PdfPage({ doc, page, width, onHeight, restoreAnchor, onS
         textLayer.cancel();
         return;
       }
-
-      const index = buildTextIndex(textLayer.textDivs, textLayer.textContentItemsStr);
-      indexRef.current = index;
-
-      // Re-bind a saved selection for this page, unless the user already has a
-      // live selection going (e.g. during a resize). Applying the actual DOM
-      // selection is the most direct proof the anchor round-trips.
-      const saved = restoreRef.current;
-      if (saved) {
-        const range = anchorToRange(index, saved);
-        const sel = window.getSelection();
-        if (range && sel && (sel.rangeCount === 0 || sel.isCollapsed)) {
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      }
+      setIndex(buildTextIndex(textLayer.textDivs, textLayer.textContentItemsStr));
     })().catch(() => {
       /* render races are expected during fast turns; ignore. */
     });
@@ -115,32 +114,81 @@ export default function PdfPage({ doc, page, width, onHeight, restoreAnchor, onS
     };
   }, [doc, page, width, onHeight]);
 
-  // Capture user selections on pointer-up. Restores apply the selection
-  // programmatically (no pointer event), so they never loop back through here.
+  // Re-derive the mark rects whenever the layout (index) or the marks change.
+  // Each anchor resolves to a Range against the fresh text layer, whose client
+  // rects — one per wrapped line — are converted to wrapper-relative boxes.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || !index) {
+      setMarks([]);
+      return;
+    }
+    const origin = wrap.getBoundingClientRect();
+    const out: RenderedMark[] = [];
+    for (const a of annotations) {
+      if (a.anchor.kind !== 'text') continue; // region marks are issue #12
+      const range = anchorToRange(index, a.anchor);
+      if (!range) continue;
+      const rects = [...range.getClientRects()]
+        .filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => ({
+          left: r.left - origin.left,
+          top: r.top - origin.top,
+          width: r.width,
+          height: r.height,
+        }));
+      if (rects.length) out.push({ id: a.id, type: a.type, color: a.color, rects });
+    }
+    setMarks(out);
+  }, [index, annotations]);
+
+  // Capture user selections on pointer-up. A drag-select ends here (not with a
+  // click), so we report the selection for the menu; a collapsed selection
+  // dismisses it.
   useEffect(() => {
     const el = textRef.current;
     if (!el || !onSelect) return;
     const onUp = () => {
-      const idx = indexRef.current;
-      if (!idx) return;
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      if (!index || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        onSelect(null);
+        return;
+      }
       const range = sel.getRangeAt(0);
-      if (!el.contains(range.commonAncestorContainer)) return;
-      onSelect(rangeToAnchor(idx, range));
+      if (!el.contains(range.commonAncestorContainer)) {
+        onSelect(null);
+        return;
+      }
+      const anchor = rangeToAnchor(index, range);
+      onSelect(anchor ? { anchor, rect: range.getBoundingClientRect() } : null);
     };
     el.addEventListener('pointerup', onUp);
     return () => el.removeEventListener('pointerup', onUp);
-  }, [onSelect]);
+  }, [index, onSelect]);
 
   return (
-    <div className="relative">
+    <div ref={wrapRef} className="relative">
       <canvas
         ref={canvasRef}
         className="pdf-page block rounded shadow-lg ring-1 ring-black/10 dark:ring-white/10"
       />
       {/* Transparent, selectable glyph boxes aligned over the canvas. */}
       <div ref={textRef} className="textLayer" />
+      {/* Persisted marks, above the text layer so they can be tapped to remove. */}
+      <div className="markLayer">
+        {marks.map((m) =>
+          m.rects.map((r, i) => (
+            <div
+              key={`${m.id}:${i}`}
+              style={markRectStyle(m.type, m.color, r)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMarkClick?.(m.id, (e.currentTarget as HTMLElement).getBoundingClientRect());
+              }}
+            />
+          )),
+        )}
+      </div>
     </div>
   );
 }
