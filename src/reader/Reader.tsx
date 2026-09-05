@@ -6,6 +6,7 @@ import { getBook, saveBookPosition } from '../db/library';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
+import type { TextAnchor } from '../types';
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
@@ -23,6 +24,32 @@ function bandIndexOf(tops: number[], offset: number): number {
   let idx = 0;
   for (let i = 0; i < tops.length; i++) if (tops[i] <= offset + 1e-6) idx = i;
   return idx;
+}
+
+// The last selection made in a book, remembered across reloads (issue #08 spike).
+// This is deliberately a lightweight demo of the anchor round-trip, not the real
+// annotation model — persistent highlights arrive with #09. One record per book.
+type SavedSelection = { page: number; anchor: TextAnchor };
+
+function selKey(bookId: string) {
+  return `reading-stage:selection:${bookId}`;
+}
+
+function readSelection(bookId: string): SavedSelection | null {
+  try {
+    const raw = localStorage.getItem(selKey(bookId));
+    return raw ? (JSON.parse(raw) as SavedSelection) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSelection(bookId: string, sel: SavedSelection) {
+  try {
+    localStorage.setItem(selKey(bookId), JSON.stringify(sel));
+  } catch {
+    /* storage unavailable (private mode) — the selection just won't survive. */
+  }
 }
 
 // The paginated reader for one open book. A page is fit to the viewport width;
@@ -58,6 +85,27 @@ export default function Reader({ bookId }: { bookId: string }) {
   // can read them without re-subscribing on every turn.
   const posRef = useRef({ currentPage, pageOffset, resumed });
   posRef.current = { currentPage, pageOffset, resumed };
+
+  // The last text selection made in this book (issue #08 spike). Loaded from
+  // localStorage on open; re-bound on the page it was made on to demonstrate the
+  // anchor round-trips across a reload.
+  const [savedSel, setSavedSel] = useState<SavedSelection | null>(null);
+  useEffect(() => {
+    setSavedSel(readSelection(bookId));
+  }, [bookId]);
+  const restoreAnchor =
+    savedSel && savedSel.page === currentPage ? savedSel.anchor : null;
+
+  const onSelect = useCallback(
+    (anchor: TextAnchor | null) => {
+      if (!anchor) return;
+      const page = useReader.getState().currentPage;
+      const sel = { page, anchor };
+      writeSelection(bookId, sel);
+      setSavedSel(sel);
+    },
+    [bookId],
+  );
 
   // Load this book's bytes and restore its saved position (issue #07) so every
   // book reopens exactly where you left off; a never-opened book resumes at
@@ -183,8 +231,11 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [nextPage, prevPage]);
 
-  // Click/tap the left or right half of the reading surface to turn.
+  // Click/tap the left or right half of the reading surface to turn. A click
+  // that ends a text selection must not also turn the page (issue #08).
   const onSurfaceClick = (e: React.MouseEvent<HTMLElement>) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     const { left, width: w } = e.currentTarget.getBoundingClientRect();
     if (e.clientX - left < w / 2) prevPage();
     else nextPage();
@@ -276,7 +327,14 @@ export default function Reader({ bookId }: { bookId: string }) {
               className="ease-out motion-safe:transition-transform motion-safe:duration-300"
               style={{ width, transform: `translateY(${-shift}px)` }}
             >
-              <PdfPage doc={doc} page={currentPage} width={width} onHeight={onHeight} />
+              <PdfPage
+                doc={doc}
+                page={currentPage}
+                width={width}
+                onHeight={onHeight}
+                restoreAnchor={restoreAnchor}
+                onSelect={onSelect}
+              />
             </div>
           </div>
         )}

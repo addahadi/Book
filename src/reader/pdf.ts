@@ -7,6 +7,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 export type PdfDocument = pdfjsLib.PDFDocumentProxy;
 export type PdfPage = pdfjsLib.PDFPageProxy;
 
+// The selectable text layer (issue #08). Re-exported here so components consume
+// pdf.js only through this module (SPEC §7) — never import pdfjs-dist directly.
+export const TextLayer = pdfjsLib.TextLayer;
+export type TextLayerInstance = InstanceType<typeof pdfjsLib.TextLayer>;
+
 /** Load a PDF document from a URL or raw bytes. */
 export async function loadDocument(
   src: string | ArrayBuffer | Uint8Array,
