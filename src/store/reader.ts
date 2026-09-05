@@ -20,6 +20,10 @@ type ReaderState = {
   // sentinel set by prevPage) snaps to the last band; otherwise we snap to the
   // nearest band top so a resize keeps you in place.
   setBandTops: (tops: number[]) => void;
+  // Restore a saved position (issue #07) when reopening a book: jump straight to
+  // the persisted page and in-page offset. Band tops reset until the render layer
+  // measures the page, which then snaps `pageOffset` to the nearest band top.
+  restorePosition: (page: number, offset: number) => void;
   goToPage: (page: number) => void;
   nextPage: () => void;
   prevPage: () => void;
@@ -45,6 +49,11 @@ export const useReader = create<ReaderState>((set, get) => ({
     const offset =
       pageOffset >= 1 ? safe[safe.length - 1] : safe[bandIndexOf(safe, pageOffset)];
     set({ bandTops: safe, pageOffset: offset });
+  },
+  restorePosition: (page, offset) => {
+    const { numPages } = get();
+    const clamped = Math.max(1, numPages ? Math.min(page, numPages) : page);
+    set({ currentPage: clamped, pageOffset: offset, bandTops: [0] });
   },
   // Jumping to a page lands at its top. Resets the band layout until the render
   // layer measures the new page.

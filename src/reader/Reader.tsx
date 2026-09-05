@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import PdfPage from './PdfPage';
 import PositionIndicator from './PositionIndicator';
 import { usePdfDocument } from './usePdfDocument';
-import { getBook } from '../db/library';
+import { getBook, saveBookPosition } from '../db/library';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
@@ -40,7 +40,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     setBandTops,
     nextPage,
     prevPage,
-    goToPage,
+    restorePosition,
   } = useReader();
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -49,19 +49,28 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 }); // the clipped reading viewport
   const [pageHeight, setPageHeight] = useState(0); // rendered page CSS height
+  // True once this book's saved position has been restored. Gates the persist
+  // effect so we never write the pre-restore default back over the saved spot.
+  const [resumed, setResumed] = useState(false);
   const clipRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
+  // Latest position + resume flag, mirrored into refs so the leave-book flush
+  // can read them without re-subscribing on every turn.
+  const posRef = useRef({ currentPage, pageOffset, resumed });
+  posRef.current = { currentPage, pageOffset, resumed };
 
-  // Load this book's bytes and reset the reader to page 1 so opening a book
-  // never lands you mid-way through it. Falls back to the shelf if the book was
-  // removed out from under us.
+  // Load this book's bytes and restore its saved position (issue #07) so every
+  // book reopens exactly where you left off; a never-opened book resumes at
+  // page 1 / offset 0. Falls back to the shelf if the book was removed out from
+  // under us.
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setTitle('');
     setLoadError(null);
     setNumPages(0);
-    goToPage(1);
+    setResumed(false);
+    restorePosition(1, 0);
     getBook(bookId)
       .then(async (book) => {
         if (cancelled) return;
@@ -70,6 +79,8 @@ export default function Reader({ bookId }: { bookId: string }) {
           return;
         }
         setTitle(book.title);
+        restorePosition(book.lastPage ?? 1, book.lastPosition ?? 0);
+        setResumed(true);
         const buf = await book.bytes.arrayBuffer();
         if (!cancelled) setData(new Uint8Array(buf));
       })
@@ -77,7 +88,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [bookId, closeBook, setNumPages, goToPage]);
+  }, [bookId, closeBook, setNumPages, restorePosition]);
 
   const { doc, error: renderError } = usePdfDocument(data);
   const error = loadError ?? renderError;
@@ -86,6 +97,29 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => {
     if (doc) setNumPages(doc.numPages);
   }, [doc, setNumPages]);
+
+  // Persist the reading position for auto-resume (issue #07). Debounced so
+  // band-by-band turning doesn't hammer IndexedDB, and gated on `resumed` so it
+  // only writes after the saved position has been restored for this book.
+  useEffect(() => {
+    if (!resumed) return;
+    const t = setTimeout(() => {
+      saveBookPosition(bookId, currentPage, pageOffset).catch(() => {
+        /* storage hiccup — position just won't update this tick. */
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [bookId, currentPage, pageOffset, resumed]);
+
+  // Flush the final position when leaving this book (closing to the shelf,
+  // switching books, or unmount) so a turn made within the debounce window
+  // isn't lost before a reload.
+  useEffect(() => {
+    return () => {
+      const { currentPage: p, pageOffset: o, resumed: r } = posRef.current;
+      if (r) saveBookPosition(bookId, p, o).catch(() => {});
+    };
+  }, [bookId]);
 
   // Measure the clipped reading viewport (drives fit-width and band count).
   useEffect(() => {

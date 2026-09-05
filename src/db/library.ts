@@ -65,6 +65,18 @@ export async function getBook(id: string): Promise<Book | undefined> {
   return db.books.get(id);
 }
 
+/**
+ * Persist the reading position for auto-resume (issue #07): the current page and
+ * the in-page band offset, keyed by book id. A no-op if the book was removed.
+ */
+export async function saveBookPosition(
+  id: string,
+  lastPage: number,
+  lastPosition: number,
+): Promise<void> {
+  await db.books.update(id, { lastPage, lastPosition });
+}
+
 /** Remove a book and its bytes, reclaiming storage. Takes its sidecar with it. */
 export async function removeBook(id: string): Promise<void> {
   await db.books.delete(id);
