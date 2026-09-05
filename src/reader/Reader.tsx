@@ -257,8 +257,12 @@ export default function Reader({ bookId }: { bookId: string }) {
   }, [nextPage, prevPage]);
 
   // Tapping the page does NOT turn it — pages turn via the arrow keys, the
-  // header buttons, or a swipe. A tap on the surface only dismisses an open menu.
+  // header buttons, or a swipe. A tap on the surface only dismisses an open menu,
+  // but never when a selection just completed (that pointer-up is what opens the
+  // selection menu — a click-away collapses the selection first, so it dismisses).
   const onSurfacePointerUp = () => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     if (pendingSel || pendingRemove) {
       setPendingSel(null);
       setPendingRemove(null);
