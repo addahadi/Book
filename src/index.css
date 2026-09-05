@@ -59,8 +59,40 @@ body {
   height: 0;
 }
 
+/*
+ * Keep the glyph spans above the selection sentinel (endOfContent, z-index 0).
+ * Without this the sentinel — which fills the layer while selecting and is
+ * `user-select: none` — would sit over the spans and block selection outright.
+ * Matches pdf.js's own text-layer stacking.
+ */
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+
 .textLayer ::selection {
   background: rgba(90, 140, 255, 0.4);
+}
+
+/*
+ * The selection sentinel (see reader/textSelection.ts). Normally a zero-height
+ * strip parked below the layer; while selecting it fills the layer as an
+ * invisible, unselectable backdrop the browser extends the selection over — the
+ * mechanism that makes dragging a selection smooth instead of snapping between
+ * glyph boxes. Ported from pdf.js's own text layer.
+ */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
 }
 
 /*

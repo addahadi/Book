@@ -3,6 +3,16 @@ import { TextLayer, type PdfDocument, type TextLayerInstance } from './pdf';
 import type { Annotation, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
 import { markRectStyle, type MarkRect } from './marks';
+import { ensureTextLayerRegistered, unregisterTextLayer } from './textSelection';
+
+// Minimum device-pixels per CSS pixel to render the page backing store at. We
+// oversample past `devicePixelRatio` — Chrome's own PDF viewer supersamples,
+// which is why it can look sharper than a plain 1:1 render on a non-HiDPI
+// screen. Downscaling the extra detail via CSS gives crisper glyph edges.
+const MIN_RENDER_SCALE = 2;
+// Browser <canvas> area ceiling (~16.7M px in Chrome/Safari). Clamp the backing
+// store below it so a tall page's oversampled canvas is never silently dropped.
+const MAX_CANVAS_AREA = 16_777_216;
 
 // A user selection resolved to an anchor plus its on-screen rect (for the menu).
 export type Selection = { anchor: TextAnchor; rect: DOMRect };
@@ -61,7 +71,10 @@ export default function PdfPage({
       if (cancelled) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      // Opaque backing store: pdf.js fills the page white before drawing, so
+      // there's no transparency to preserve, and glyphs antialias against solid
+      // white instead of a transparent buffer — visibly crisper text.
+      const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) return;
 
       // Fit the page to the requested width; height follows the aspect ratio.
@@ -70,9 +83,16 @@ export default function PdfPage({
       const heightCss = base.height * scale;
       const dpr = window.devicePixelRatio || 1;
 
-      // Backing store at device resolution (scale × dpr) → crisp text; CSS size
-      // is the fitted size, so the page is never upscaled or stretched.
-      const viewport = pdfPage.getViewport({ scale: scale * dpr });
+      // Render the backing store above CSS resolution for crisp text: at least
+      // MIN_RENDER_SCALE device-pixels per CSS pixel (supersampling, like
+      // Chrome's viewer), never below the real dpr, and clamped so the canvas
+      // area stays under the browser ceiling for a tall page.
+      const maxScale = Math.sqrt(MAX_CANVAS_AREA / Math.max(1, width * heightCss));
+      const renderScale = Math.min(Math.max(dpr, MIN_RENDER_SCALE), maxScale);
+
+      // CSS size is the fitted size, so the page is never upscaled or stretched;
+      // only the backing store carries the extra detail.
+      const viewport = pdfPage.getViewport({ scale: scale * renderScale });
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
       canvas.style.width = `${width}px`;
@@ -107,6 +127,9 @@ export default function PdfPage({
       }
       host.style.setProperty('--scale-factor', String(scale));
       host.replaceChildren(...Array.from(detached.childNodes));
+      // Re-attach the selection sentinel after swapping in the fresh spans, so
+      // dragging a selection stays smooth (see ./textSelection). Idempotent.
+      ensureTextLayerRegistered(host);
       setIndex(buildTextIndex(textLayer.textDivs, textLayer.textContentItemsStr));
     })().catch(() => {
       /* render races are expected during fast turns; ignore. */
@@ -117,6 +140,10 @@ export default function PdfPage({
       textLayer?.cancel();
     };
   }, [doc, page, width, onHeight]);
+
+  // Detach this page's text layer from the global selection-smoothing registry
+  // on unmount (the render effect re-registers on every re-render).
+  useEffect(() => () => unregisterTextLayer(textRef.current), []);
 
   // Re-derive the mark rects whenever the layout (index) or the marks change.
   // Each anchor resolves to a Range against the fresh text layer, whose client
