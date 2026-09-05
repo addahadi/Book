@@ -181,6 +181,10 @@ export default function PdfPage({
             <div
               key={`${m.id}:${i}`}
               style={markRectStyle(m.type, m.color, r)}
+              // Stop the surface seeing this as a page-turn tap; open the remove
+              // menu on click.
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 onMarkClick?.(m.id, (e.currentTarget as HTMLElement).getBoundingClientRect());
