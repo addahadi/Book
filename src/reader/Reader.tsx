@@ -97,16 +97,47 @@ export default function Reader({ bookId }: { bookId: string }) {
   }, []);
 
   // Apply a mark to the pending selection: highlight in a colour, or underline /
-  // strike through the same run via the shared anchoring engine.
+  // strike through the same run via the shared anchoring engine. Re-marking the
+  // exact same run toggles/replaces rather than stacking duplicates: same
+  // type+range+colour removes it; a highlight of a different colour replaces it.
   const createMark = useCallback(
     (type: AnnotationType, color?: string) => {
       if (!pendingSel) return;
+      const { anchor } = pendingSel;
+      const existing = annotations.find(
+        (a) =>
+          a.page === currentPage &&
+          a.type === type &&
+          a.anchor.kind === 'text' &&
+          a.anchor.startOffset === anchor.startOffset &&
+          a.anchor.endOffset === anchor.endOffset,
+      );
+
+      const finish = () => {
+        window.getSelection()?.removeAllRanges();
+        setPendingSel(null);
+      };
+
+      if (existing) {
+        // Same mark again (same colour, or a colourless underline/strike): toggle
+        // it off. A highlight in a new colour: fall through to replace it.
+        const sameColour = existing.color === color;
+        if (sameColour) {
+          removeAnnotation(existing.id).catch(() => {});
+          setAnnotations((prev) => prev.filter((a) => a.id !== existing.id));
+          finish();
+          return;
+        }
+        removeAnnotation(existing.id).catch(() => {});
+        setAnnotations((prev) => prev.filter((a) => a.id !== existing.id));
+      }
+
       const mark: Annotation = {
         id: crypto.randomUUID(),
         bookId,
         type,
         page: currentPage,
-        anchor: pendingSel.anchor,
+        anchor,
         color,
         createdAt: Date.now(),
         tags: [],
@@ -114,10 +145,9 @@ export default function Reader({ bookId }: { bookId: string }) {
       };
       addAnnotation(mark).catch(() => {});
       setAnnotations((prev) => [...prev, mark]);
-      window.getSelection()?.removeAllRanges();
-      setPendingSel(null);
+      finish();
     },
-    [pendingSel, bookId, currentPage],
+    [pendingSel, annotations, bookId, currentPage],
   );
 
   const removeMark = useCallback((id: string) => {

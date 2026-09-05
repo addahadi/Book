@@ -39,7 +39,7 @@ body {
   text-size-adjust: none;
   forced-color-adjust: none;
   transform-origin: 0 0;
-  z-index: 1;
+  z-index: 2;
   caret-color: transparent;
   user-select: text;
   -webkit-user-select: text;
@@ -65,13 +65,13 @@ body {
 
 /*
  * Mark layer (issue #09) — persisted highlights / underlines / strikes, painted
- * over the text layer. The container is click-through; individual marks opt back
- * in (pointer-events: auto) so they can be tapped to remove. Not `.pdf-page`, so
- * night mode's invert filter leaves mark colours true.
+ * UNDER the transparent text layer (z-index below it) so marks never block
+ * selection. Fully click-through; removal is a tap hit-test on the text layer.
+ * Not `.pdf-page`, so night mode's invert filter leaves mark colours true.
  */
 .markLayer {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 1;
   pointer-events: none;
 }

@@ -83,19 +83,21 @@ export default function PdfPage({
       if (cancelled) return;
       onHeight?.(heightCss);
 
-      // Text layer, laid out in CSS pixels over the canvas. It uses the CSS-scale
-      // viewport (NOT the dpr-scaled one), and `--scale-factor` must be set on
-      // the container *before* construction — the TextLayer sizes the container
-      // as `calc(var(--scale-factor) * pageWidth)` in its constructor.
-      const container = textRef.current;
-      if (!container) return;
-      container.replaceChildren();
-      container.style.setProperty('--scale-factor', String(scale));
+      // Text layer, laid out in CSS pixels over the canvas (CSS-scale viewport,
+      // NOT the dpr-scaled one). Render into a DETACHED element and swap it into
+      // the live layer only once complete: TextLayer.render() appends spans
+      // incrementally and ignores our cancelled flag, so a stale/aborted render
+      // must never touch the on-screen container or its spans double up (the
+      // "selection looks doubled" bug). `--scale-factor` drives the span
+      // positions/sizes, so it lives on the host the spans end up in.
+      const host = textRef.current;
+      if (!host) return;
+      const detached = document.createElement('div');
       const textContent = await pdfPage.getTextContent();
       if (cancelled) return;
       textLayer = new TextLayer({
         textContentSource: textContent,
-        container,
+        container: detached,
         viewport: pdfPage.getViewport({ scale }),
       });
       await textLayer.render();
@@ -103,6 +105,8 @@ export default function PdfPage({
         textLayer.cancel();
         return;
       }
+      host.style.setProperty('--scale-factor', String(scale));
+      host.replaceChildren(...Array.from(detached.childNodes));
       setIndex(buildTextIndex(textLayer.textDivs, textLayer.textContentItemsStr));
     })().catch(() => {
       /* render races are expected during fast turns; ignore. */
@@ -142,29 +146,60 @@ export default function PdfPage({
     setMarks(out);
   }, [index, annotations]);
 
-  // Capture user selections on pointer-up. A drag-select ends here (not with a
-  // click), so we report the selection for the menu; a collapsed selection
-  // dismisses it.
+  // Handle pointer-up on the (top, transparent) text layer. A drag ends here
+  // with a live selection → report it for the mark menu. A plain click with no
+  // selection → hit-test the point against the marks painted underneath and, if
+  // it lands on one, open its remove menu; otherwise dismiss.
   useEffect(() => {
     const el = textRef.current;
-    if (!el || !onSelect) return;
-    const onUp = () => {
+    if (!el) return;
+    const onUp = (e: PointerEvent) => {
       const sel = window.getSelection();
-      if (!index || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
-        onSelect(null);
+      const collapsed = !sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString();
+      if (collapsed) {
+        const hit = hitTestMark(e.clientX, e.clientY);
+        if (hit) onMarkClick?.(hit.id, hit.rect);
+        else onSelect?.(null);
         return;
       }
-      const range = sel.getRangeAt(0);
+      if (!index) return;
+      const range = sel!.getRangeAt(0);
       if (!el.contains(range.commonAncestorContainer)) {
-        onSelect(null);
+        onSelect?.(null);
         return;
       }
       const anchor = rangeToAnchor(index, range);
-      onSelect(anchor ? { anchor, rect: range.getBoundingClientRect() } : null);
+      onSelect?.(anchor ? { anchor, rect: range.getBoundingClientRect() } : null);
     };
     el.addEventListener('pointerup', onUp);
     return () => el.removeEventListener('pointerup', onUp);
-  }, [index, onSelect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, marks, onSelect, onMarkClick]);
+
+  // Which mark (if any) covers a client point, with its bounding rect in client
+  // coords for placing the remove menu.
+  function hitTestMark(clientX: number, clientY: number): { id: string; rect: DOMRect } | null {
+    const wrap = wrapRef.current;
+    if (!wrap) return null;
+    const origin = wrap.getBoundingClientRect();
+    const px = clientX - origin.left;
+    const py = clientY - origin.top;
+    for (const m of marks) {
+      const hit = m.rects.some(
+        (r) => px >= r.left && px <= r.left + r.width && py >= r.top && py <= r.top + r.height,
+      );
+      if (!hit) continue;
+      const left = Math.min(...m.rects.map((r) => r.left));
+      const top = Math.min(...m.rects.map((r) => r.top));
+      const right = Math.max(...m.rects.map((r) => r.left + r.width));
+      const bottom = Math.max(...m.rects.map((r) => r.top + r.height));
+      return {
+        id: m.id,
+        rect: new DOMRect(left + origin.left, top + origin.top, right - left, bottom - top),
+      };
+    }
+    return null;
+  }
 
   return (
     <div ref={wrapRef} className="relative">
@@ -172,27 +207,17 @@ export default function PdfPage({
         ref={canvasRef}
         className="pdf-page block rounded shadow-lg ring-1 ring-black/10 dark:ring-white/10"
       />
-      {/* Transparent, selectable glyph boxes aligned over the canvas. */}
-      <div ref={textRef} className="textLayer" />
-      {/* Persisted marks, above the text layer so they can be tapped to remove. */}
-      <div className="markLayer">
+      {/* Persisted marks, painted UNDER the text layer (click-through) so they
+          never block selection; removal is a tap hit-test on the text layer. */}
+      <div className="markLayer" aria-hidden>
         {marks.map((m) =>
           m.rects.map((r, i) => (
-            <div
-              key={`${m.id}:${i}`}
-              style={markRectStyle(m.type, m.color, r)}
-              // Stop the surface seeing this as a page-turn tap; open the remove
-              // menu on click.
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onMarkClick?.(m.id, (e.currentTarget as HTMLElement).getBoundingClientRect());
-              }}
-            />
+            <div key={`${m.id}:${i}`} style={markRectStyle(m.type, m.color, r)} />
           )),
         )}
       </div>
+      {/* Transparent, selectable glyph boxes aligned over the canvas (on top). */}
+      <div ref={textRef} className="textLayer" />
     </div>
   );
 }

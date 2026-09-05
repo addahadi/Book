@@ -31,8 +31,6 @@ export function markRectStyle(
     left: r.left,
     top: r.top,
     width: r.width,
-    pointerEvents: 'auto',
-    cursor: 'pointer',
   };
   if (type === 'highlight') {
     return { ...base, height: r.height, background: color, opacity: 0.4, borderRadius: 2 };
