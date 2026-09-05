@@ -1,31 +1,31 @@
 import { useState } from 'react';
 import { useReader } from '../store/reader';
 
-// A "felt" position sense (SPEC §6.1): two blocks of pages behind (left) and
-// ahead (right) with the current spread as a bright sliver between them, a
-// "page N of M · P% in" readout, and a go-to-page jump. Deliberately not a
+// A "felt" position sense (SPEC §6.1): a block of what's behind you (left) and
+// what's ahead (right) with a bright sliver for where you are between them, a
+// "Page N of M · P% in" readout, and a go-to-page jump. Deliberately not a
 // scroll bar — there is no draggable handle; the split *is* your position.
+//
+// Position is continuous within a page: as you turn through a tall page's bands
+// (issue #06b), the sliver and P% advance smoothly, not only at page breaks.
 export default function PositionIndicator() {
   const currentPage = useReader((s) => s.currentPage);
   const numPages = useReader((s) => s.numPages);
-  const spread = useReader((s) => s.spread);
+  const pageOffset = useReader((s) => s.pageOffset);
   const goToPage = useReader((s) => s.goToPage);
   const [draft, setDraft] = useState('');
 
   // Nothing to show until a document has loaded.
   if (!numPages) return null;
 
-  // Rightmost page currently visible (spread shows two, unless at the last page).
-  const lastVisible = spread && currentPage < numPages ? currentPage + 1 : currentPage;
-  const behind = currentPage - 1; // pages fully behind you
-  const current = lastVisible - currentPage + 1; // the open spread (1 or 2)
-  const ahead = numPages - lastVisible; // pages still ahead
-  const percent = Math.round((lastVisible / numPages) * 100);
-
-  const label =
-    lastVisible > currentPage
-      ? `Pages ${currentPage}–${lastVisible} of ${numPages}`
-      : `Page ${currentPage} of ${numPages}`;
+  // How far through the book, in pages, counting the fraction into the current
+  // page. (Clamp the offset off its "entered from end" sentinel value of 1.)
+  const pos = currentPage - 1 + Math.min(pageOffset, 0.999);
+  const behind = pos;
+  const ahead = Math.max(0, numPages - pos);
+  // A small, always-visible sliver marking "here".
+  const here = Math.max(numPages * 0.02, 0.5);
+  const percent = Math.round((pos / numPages) * 100);
 
   const onJump = (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,15 +46,12 @@ export default function PositionIndicator() {
       >
         {/* read (grows) · here (bright sliver) · ahead (shrinks) */}
         <div style={{ flexGrow: behind }} className="bg-neutral-500 dark:bg-neutral-300" />
-        <div
-          style={{ flexGrow: current }}
-          className="min-w-[4px] bg-neutral-900 dark:bg-white"
-        />
+        <div style={{ flexGrow: here }} className="min-w-[4px] bg-neutral-900 dark:bg-white" />
         <div style={{ flexGrow: ahead }} className="bg-neutral-300 dark:bg-neutral-600" />
       </div>
 
       <span className="whitespace-nowrap tabular-nums">
-        {label} · {percent}% in
+        Page {currentPage} of {numPages} · {percent}% in
       </span>
 
       <form onSubmit={onJump} className="flex items-center gap-1">

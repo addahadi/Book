@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import PdfPage from './PdfPage';
 import PositionIndicator from './PositionIndicator';
 import { usePdfDocument } from './usePdfDocument';
@@ -9,19 +9,35 @@ import { useTheme } from '../store/theme';
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
-// Below this width we drop the spread and show a single page (tablet/narrow).
-const SPREAD_MIN_WIDTH = '(min-width: 1024px)';
+// Widest a single page column is drawn, even on large screens, so text keeps a
+// comfortable measure instead of ballooning; the page centres in extra space.
+const MAX_PAGE_WIDTH = 1000;
+// Horizontal breathing room around the page column, in px (total of both sides).
+const H_GUTTER = 32;
+// Overlap between consecutive bands, as a fraction of the viewport height — a
+// strip of lines repeats across a turn so you don't lose the line at the seam.
+const BAND_OVERLAP = 0.12;
 
-// The paginated reader for one open book. Its bytes come from IndexedDB; the
-// shelf (App) decides which book is open.
+// The index of the last band whose top is at or before `offset`.
+function bandIndexOf(tops: number[], offset: number): number {
+  let idx = 0;
+  for (let i = 0; i < tops.length; i++) if (tops[i] <= offset + 1e-6) idx = i;
+  return idx;
+}
+
+// The paginated reader for one open book. A page is fit to the viewport width;
+// a page taller than the viewport is read in bands, one screen-height slice per
+// turn (see issue #06b). Bytes come from IndexedDB; the shelf (App) decides
+// which book is open.
 export default function Reader({ bookId }: { bookId: string }) {
   const closeBook = useLibrary((s) => s.closeBook);
   const {
     currentPage,
     numPages,
-    spread,
+    pageOffset,
+    bandTops,
     setNumPages,
-    setSpread,
+    setBandTops,
     nextPage,
     prevPage,
     goToPage,
@@ -31,6 +47,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [data, setData] = useState<Uint8Array | null>(null);
   const [title, setTitle] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 }); // the clipped reading viewport
+  const [pageHeight, setPageHeight] = useState(0); // rendered page CSS height
+  const clipRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
 
   // Load this book's bytes and reset the reader to page 1 so opening a book
@@ -63,26 +82,60 @@ export default function Reader({ bookId }: { bookId: string }) {
   const { doc, error: renderError } = usePdfDocument(data);
   const error = loadError ?? renderError;
 
-  const atStart = currentPage <= 1;
-  const atEnd = numPages > 0 && currentPage >= numPages;
-  // The spread's right page only exists when there's a page after the left one.
-  const rightPage = spread && currentPage < numPages ? currentPage + 1 : null;
-
   // Publish the loaded document's page count to the store.
   useEffect(() => {
     if (doc) setNumPages(doc.numPages);
   }, [doc, setNumPages]);
 
-  // Track viewport width → spread vs single. Switches automatically on resize.
+  // Measure the clipped reading viewport (drives fit-width and band count).
   useEffect(() => {
-    const mql = window.matchMedia(SPREAD_MIN_WIDTH);
-    const apply = () => setSpread(mql.matches);
-    apply();
-    mql.addEventListener('change', apply);
-    return () => mql.removeEventListener('change', apply);
-  }, [setSpread]);
+    const el = clipRef.current;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  // ← / → keys turn pages. Bound once; the store reads live state.
+  const width = Math.min(Math.max(box.w - H_GUTTER, 0), MAX_PAGE_WIDTH);
+
+  const onHeight = useCallback((h: number) => {
+    setPageHeight((prev) => (Math.abs(prev - h) < 0.5 ? prev : h));
+  }, []);
+
+  // Recompute band tops whenever the page's rendered height or the viewport
+  // height changes (new page, resize). The store reconciles the stored offset
+  // so you stay in place across a resize.
+  useEffect(() => {
+    const vh = box.h;
+    const H = pageHeight;
+    if (!vh || !H) return;
+    const overlap = vh * BAND_OVERLAP;
+    const step = Math.max(1, vh - overlap);
+    let tops: number[];
+    if (H <= vh) {
+      tops = [0]; // the whole page fits — a single band
+    } else {
+      const count = Math.ceil((H - vh) / step) + 1;
+      tops = [];
+      // Each band top is one step down, but the last clamps flush to the page
+      // bottom so you never land on empty space below the text.
+      for (let i = 0; i < count; i++) tops.push(Math.min(i * step, H - vh) / H);
+    }
+    setBandTops(tops);
+  }, [pageHeight, box.h, currentPage, setBandTops]);
+
+  // How far to slide the page up to reveal the current band, clamped so the
+  // last band sits flush against the page bottom.
+  const maxShift = Math.max(0, pageHeight - box.h);
+  const shift = Math.min(pageOffset * pageHeight, maxShift);
+
+  const bi = bandIndexOf(bandTops, pageOffset);
+  const atStart = currentPage <= 1 && bi === 0;
+  const atEnd = numPages > 0 && currentPage >= numPages && bi === bandTops.length - 1;
+
+  // ← / → keys turn pages/bands. Bound once; the store reads live state.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Don't hijack arrows while typing in a field (e.g. go-to-page).
@@ -98,8 +151,8 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   // Click/tap the left or right half of the reading surface to turn.
   const onSurfaceClick = (e: React.MouseEvent<HTMLElement>) => {
-    const { left, width } = e.currentTarget.getBoundingClientRect();
-    if (e.clientX - left < width / 2) prevPage();
+    const { left, width: w } = e.currentTarget.getBoundingClientRect();
+    if (e.clientX - left < w / 2) prevPage();
     else nextPage();
   };
 
@@ -147,7 +200,6 @@ export default function Reader({ bookId }: { bookId: string }) {
           </button>
           <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
             page {currentPage}
-            {rightPage ? `–${rightPage}` : ''}
             {numPages ? ` of ${numPages}` : ''}
           </span>
           <div className="flex gap-1">
@@ -155,7 +207,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               type="button"
               onClick={prevPage}
               disabled={atStart}
-              aria-label="Previous page"
+              aria-label="Turn back"
               className="rounded px-2 py-1 ring-1 ring-black/10 enabled:hover:bg-black/5 disabled:opacity-40 dark:ring-white/10 dark:enabled:hover:bg-white/5"
             >
               ←
@@ -164,7 +216,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               type="button"
               onClick={nextPage}
               disabled={atEnd}
-              aria-label="Next page"
+              aria-label="Turn forward"
               className="rounded px-2 py-1 ring-1 ring-black/10 enabled:hover:bg-black/5 disabled:opacity-40 dark:ring-white/10 dark:enabled:hover:bg-white/5"
             >
               →
@@ -176,25 +228,23 @@ export default function Reader({ bookId }: { bookId: string }) {
         onClick={onSurfaceClick}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        className="flex flex-1 select-none items-center justify-center gap-2 overflow-hidden p-6"
+        className="relative flex-1 select-none overflow-hidden"
       >
         {error ? (
-          <div className="p-6 text-sm text-red-600 dark:text-red-400">
+          <div className="flex h-full items-center justify-center p-6 text-sm text-red-600 dark:text-red-400">
             Failed to render PDF: {error}
           </div>
         ) : (
-          <>
-            {/* Each page gets a bounded flex cell so it can fit itself to the
-                space (half the width in a spread), preserving aspect ratio. */}
-            <div className="flex h-full min-w-0 flex-1 items-center justify-center">
-              <PdfPage doc={doc} page={currentPage} />
+          // The clip is the viewport; the inner column is the fit-width page,
+          // slid up by `shift` to show the current band.
+          <div ref={clipRef} className="absolute inset-0 flex items-start justify-center overflow-hidden">
+            <div
+              className="ease-out motion-safe:transition-transform motion-safe:duration-300"
+              style={{ width, transform: `translateY(${-shift}px)` }}
+            >
+              <PdfPage doc={doc} page={currentPage} width={width} onHeight={onHeight} />
             </div>
-            {rightPage && (
-              <div className="flex h-full min-w-0 flex-1 items-center justify-center">
-                <PdfPage doc={doc} page={rightPage} />
-              </div>
-            )}
-          </>
+          </div>
         )}
       </main>
       <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">

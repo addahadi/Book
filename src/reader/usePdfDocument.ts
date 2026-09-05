@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { loadDocument, type PdfDocument } from './pdf';
 
 /**
- * Load a PDF document once per `src`. Kept separate from page rendering so a
- * two-page spread can share a single loaded document across both page canvases.
+ * Load a PDF document once per `src`. Kept separate from page rendering so the
+ * loaded document is shared across renders (page turns, band re-slices) without
+ * reloading the file.
  */
 export function usePdfDocument(src: string | ArrayBuffer | Uint8Array | null) {
   const [doc, setDoc] = useState<PdfDocument | null>(null);
