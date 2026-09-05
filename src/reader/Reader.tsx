@@ -184,8 +184,16 @@ export default function Reader({ bookId }: { bookId: string }) {
           </div>
         ) : (
           <>
-            <PdfPage doc={doc} page={currentPage} />
-            {rightPage && <PdfPage doc={doc} page={rightPage} />}
+            {/* Each page gets a bounded flex cell so it can fit itself to the
+                space (half the width in a spread), preserving aspect ratio. */}
+            <div className="flex h-full min-w-0 flex-1 items-center justify-center">
+              <PdfPage doc={doc} page={currentPage} />
+            </div>
+            {rightPage && (
+              <div className="flex h-full min-w-0 flex-1 items-center justify-center">
+                <PdfPage doc={doc} page={rightPage} />
+              </div>
+            )}
           </>
         )}
       </main>
