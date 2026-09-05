@@ -13,9 +13,6 @@ import type { Annotation, AnnotationType } from '../types';
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
-// How far a pointer may move between down and up and still count as a tap (vs. a
-// text-selection drag). Beyond this, the gesture never turns the page.
-const TAP_SLOP = 10;
 // Widest a single page column is drawn, even on large screens, so text keeps a
 // comfortable measure instead of ballooning; the page centres in extra space.
 const MAX_PAGE_WIDTH = 1000;
@@ -61,8 +58,6 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [resumed, setResumed] = useState(false);
   const clipRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
-  // Where a surface pointer went down, to tell a tap (turn) from a drag (select).
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
   // Latest position + resume flag, mirrored into refs so the leave-book flush
   // can read them without re-subscribing on every turn.
   const posRef = useRef({ currentPage, pageOffset, resumed });
@@ -261,28 +256,13 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [nextPage, prevPage]);
 
-  // Tap the left or right half of the reading surface to turn. We drive this from
-  // pointer down/up (not click) so a text-selection drag is never mistaken for a
-  // turn: only a primary-button tap that barely moved, with no live selection,
-  // turns the page. A tap while a menu is open just dismisses it (issue #09).
-  const onSurfacePointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    pointerStart.current = { x: e.clientX, y: e.clientY };
-  };
-  const onSurfacePointerUp = (e: React.PointerEvent<HTMLElement>) => {
-    const start = pointerStart.current;
-    pointerStart.current = null;
-    if (e.button !== 0) return; // ignore right / middle button
-    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
+  // Tapping the page does NOT turn it — pages turn via the arrow keys, the
+  // header buttons, or a swipe. A tap on the surface only dismisses an open menu.
+  const onSurfacePointerUp = () => {
     if (pendingSel || pendingRemove) {
       setPendingSel(null);
       setPendingRemove(null);
-      return;
     }
-    const { left, width: w } = e.currentTarget.getBoundingClientRect();
-    if (e.clientX - left < w / 2) prevPage();
-    else nextPage();
   };
 
   // Swipe left/right on touch devices.
@@ -354,7 +334,6 @@ export default function Reader({ bookId }: { bookId: string }) {
         </div>
       </header>
       <main
-        onPointerDown={onSurfacePointerDown}
         onPointerUp={onSurfacePointerUp}
         onContextMenu={(e) => e.preventDefault()}
         onTouchStart={onTouchStart}
