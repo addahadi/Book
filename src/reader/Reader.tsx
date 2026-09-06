@@ -16,7 +16,7 @@ import { UNDERLINE_COLOR, STRIKE_COLOR, HIGHLIGHT_COLORS } from './marks';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
-import type { Annotation, AnnotationType, TextAnchor } from '../types';
+import type { Annotation, AnnotationType, RegionRect, TextAnchor } from '../types';
 
 // The note editor's target: a brand-new note over a just-selected run (not yet
 // persisted — a draft), or an existing annotation being edited. Keeping a new
@@ -66,6 +66,11 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   const [data, setData] = useState<Uint8Array | null>(null);
   const [title, setTitle] = useState('');
+  // Whether this book has a usable text layer (issue #12). A scanned, image-only
+  // PDF has none, so text-run marks are off and the page takes region boxes
+  // instead. Defaults true so a born-digital book is never wrongly degraded.
+  const [hasTextLayer, setHasTextLayer] = useState(true);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 }); // the clipped reading viewport
   const [pageHeight, setPageHeight] = useState(0); // rendered page CSS height
@@ -220,6 +225,28 @@ export default function Reader({ bookId }: { bookId: string }) {
     setPendingRemove(null);
   }, []);
 
+  // Persist a region-box highlight drawn over a scanned page (issue #12): a
+  // page-anchored box in normalized coords, default highlight colour. No text
+  // run is involved, so it stores a `RegionRect` anchor rather than a TextAnchor.
+  const createRegion = useCallback(
+    (rect: RegionRect) => {
+      const mark: Annotation = {
+        id: crypto.randomUUID(),
+        bookId,
+        type: 'region',
+        page: currentPage,
+        anchor: rect,
+        color: HIGHLIGHT_COLORS[0].value,
+        createdAt: Date.now(),
+        tags: [],
+        links: [],
+      };
+      addAnnotation(mark).catch(() => {});
+      setAnnotations((prev) => [...prev, mark]);
+    },
+    [bookId, currentPage],
+  );
+
   // Start a fresh margin note over the pending selection. Nothing is persisted
   // yet — the editor opens on a draft carrying the run's anchor, and the `note`
   // annotation is created only if the user actually writes something.
@@ -311,6 +338,8 @@ export default function Reader({ bookId }: { bookId: string }) {
     let cancelled = false;
     setData(null);
     setTitle('');
+    setHasTextLayer(true);
+    setNoticeDismissed(false);
     setLoadError(null);
     setNumPages(0);
     setResumed(false);
@@ -323,6 +352,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           return;
         }
         setTitle(book.title);
+        setHasTextLayer(book.hasTextLayer !== false);
         restorePosition(book.lastPage ?? 1, book.lastPosition ?? 0);
         setResumed(true);
         const buf = await book.bytes.arrayBuffer();
@@ -517,6 +547,23 @@ export default function Reader({ bookId }: { bookId: string }) {
           </div>
         </div>
       </header>
+      {!hasTextLayer && !noticeDismissed && (
+        <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-400/20 dark:bg-amber-950/40 dark:text-amber-200">
+          <span aria-hidden>⚠</span>
+          <span className="min-w-0 flex-1">
+            This book has no text layer — it looks scanned. You can bookmark pages and drag to
+            draw region highlights over the page image, but text can't be selected or searched.
+          </span>
+          <button
+            type="button"
+            onClick={() => setNoticeDismissed(true)}
+            aria-label="Dismiss notice"
+            className="shrink-0 rounded px-2 py-0.5 ring-1 ring-amber-500/30 hover:bg-amber-500/10 dark:ring-amber-400/20"
+          >
+            Got it
+          </button>
+        </div>
+      )}
       <main
         onPointerUp={onSurfacePointerUp}
         onContextMenu={(e) => e.preventDefault()}
@@ -541,10 +588,12 @@ export default function Reader({ bookId }: { bookId: string }) {
                 page={currentPage}
                 width={width}
                 annotations={pageAnnotations}
+                regionMode={!hasTextLayer}
                 onHeight={onHeight}
                 onSelect={onSelect}
                 onMarkClick={onMarkClick}
                 onNoteClick={onNoteClick}
+                onRegionDraw={createRegion}
               />
             </div>
           </div>
@@ -563,7 +612,13 @@ export default function Reader({ bookId }: { bookId: string }) {
         <SelectionMenu
           rect={pendingRemove.rect}
           onRemove={() => removeMark(pendingRemove.id)}
-          onNote={() => onNoteClick(pendingRemove.id, pendingRemove.rect)}
+          // A region box (scanned page) has no text run to note against, so its
+          // remove menu is Remove-only; text marks keep the Note action.
+          onNote={
+            annotations.find((a) => a.id === pendingRemove.id)?.type === 'region'
+              ? undefined
+              : () => onNoteClick(pendingRemove.id, pendingRemove.rect)
+          }
         />
       )}
       {editingNote && (

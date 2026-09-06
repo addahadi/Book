@@ -152,6 +152,34 @@ body {
 }
 
 /*
+ * Region layer (issue #12) — the scanned-PDF fallback. Rectangular highlights
+ * drawn over the page image sit just below the (empty) text layer, which catches
+ * the drag. Decorative and click-through; the drag/hit-test lives on the text
+ * layer above. Not `.pdf-page`, so night mode's invert leaves the wash true.
+ */
+.regionLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.regionBox {
+  position: absolute;
+  background: #facc15;
+  opacity: 0.4;
+  border-radius: 2px;
+}
+
+/* The live rectangle while dragging — an outline, so you see the page under it. */
+.regionDraft {
+  position: absolute;
+  border: 1.5px dashed rgba(37, 99, 235, 0.9);
+  background: rgba(37, 99, 235, 0.12);
+  border-radius: 2px;
+}
+
+/*
  * Dog-ear (issue #11) — a colour-coded folded corner marking a bookmarked page.
  * A CSS triangle pinned to the page's top-right corner: the top border carries
  * the bookmark colour (set inline), the left border is transparent so the fold

@@ -15,7 +15,9 @@ type CreateProps = {
 type RemoveProps = {
   rect: DOMRect;
   onRemove: () => void;
-  onNote: () => void;
+  // A region-box highlight (issue #12) carries no run to attach a margin note to,
+  // so its remove menu omits the Note action — hidden when this is absent.
+  onNote?: () => void;
   onHighlight?: never;
   onUnderline?: never;
   onStrike?: never;
@@ -51,10 +53,14 @@ export default function SelectionMenu(props: Props) {
     <div style={position(props.rect)} className={menu} onClick={stop} onPointerDown={stop}>
       {props.onRemove ? (
         <>
-          <button type="button" onClick={props.onNote} className={btn}>
-            ✎ Note
-          </button>
-          <span className="mx-1 h-5 w-px bg-black/10 dark:bg-white/15" />
+          {props.onNote && (
+            <>
+              <button type="button" onClick={props.onNote} className={btn}>
+                ✎ Note
+              </button>
+              <span className="mx-1 h-5 w-px bg-black/10 dark:bg-white/15" />
+            </>
+          )}
           <button
             type="button"
             onClick={props.onRemove}

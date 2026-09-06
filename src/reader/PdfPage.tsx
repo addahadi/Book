@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextLayer, type PdfDocument, type TextLayerInstance } from './pdf';
-import type { Annotation, TextAnchor } from '../types';
+import type { Annotation, RegionRect, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
 import { markRectStyle, type MarkRect } from './marks';
 import { ensureTextLayerRegistered, unregisterTextLayer } from './textSelection';
+
+// A drag shorter than this (px, either axis) counts as a click, not a region
+// box — so a plain tap on a scanned page can select an existing box to remove
+// rather than dropping a zero-area rectangle.
+const REGION_MIN_DRAG = 6;
 
 // Minimum device-pixels per CSS pixel to render the page backing store at. We
 // oversample past `devicePixelRatio` — Chrome's own PDF viewer supersamples,
@@ -26,6 +31,9 @@ type Props = {
   width: number;
   /** Marks anchored to this page, re-rendered over the text (issue #09). */
   annotations: Annotation[];
+  /** Scanned-PDF fallback (issue #12): no text layer, so text selection is off
+      and dragging on the page draws a region-box highlight instead. */
+  regionMode?: boolean;
   /** Reports the page's rendered CSS height once drawn, so the parent can
       compute how many bands it takes and clamp the last one. */
   onHeight?: (heightCss: number) => void;
@@ -35,6 +43,8 @@ type Props = {
   onMarkClick?: (id: string, rect: DOMRect) => void;
   /** Fired when a margin note flag is clicked, with the flag's on-screen rect. */
   onNoteClick?: (id: string, rect: DOMRect) => void;
+  /** Fired when a region box is drawn (region mode), as a normalized 0..1 rect. */
+  onRegionDraw?: (rect: RegionRect) => void;
 };
 
 type RenderedMark = {
@@ -62,10 +72,12 @@ export default function PdfPage({
   page,
   width,
   annotations,
+  regionMode = false,
   onHeight,
   onSelect,
   onMarkClick,
   onNoteClick,
+  onRegionDraw,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -74,6 +86,13 @@ export default function PdfPage({
   // the mark layer re-derives its rects once the text layer is ready.
   const [index, setIndex] = useState<PageTextIndex | null>(null);
   const [marks, setMarks] = useState<RenderedMark[]>([]);
+  // The page's rendered CSS size, so region boxes (stored normalized) can be
+  // mapped to pixels and a fresh drag normalized back.
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  // The region box being dragged out right now (px, wrapper-relative), and the
+  // in-flight gesture's origin + whether it has moved far enough to be a draw.
+  const [draft, setDraft] = useState<MarkRect | null>(null);
+  const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     if (!doc || width <= 0) return;
@@ -117,6 +136,14 @@ export default function PdfPage({
       await pdfPage.render({ canvasContext: ctx, viewport }).promise;
       if (cancelled) return;
       onHeight?.(heightCss);
+      setSize({ w: width, h: heightCss });
+
+      // Scanned page (no text layer): skip the selectable text layer entirely —
+      // there are no glyph runs to anchor to. The region layer handles marking.
+      if (regionMode) {
+        setIndex(null);
+        return;
+      }
 
       // Text layer, laid out in CSS pixels over the canvas (CSS-scale viewport,
       // NOT the dpr-scaled one). Render into a DETACHED element and swap it into
@@ -154,7 +181,7 @@ export default function PdfPage({
       cancelled = true;
       textLayer?.cancel();
     };
-  }, [doc, page, width, onHeight]);
+  }, [doc, page, width, onHeight, regionMode]);
 
   // Detach this page's text layer from the global selection-smoothing registry
   // on unmount (the render effect re-registers on every re-render).
@@ -248,6 +275,96 @@ export default function PdfPage({
   // colour-coded dog-ear folded into the page's top-right corner.
   const bookmark = annotations.find((a) => a.type === 'bookmark');
 
+  // Region-box highlights on this page (issue #12), each stored normalized 0..1
+  // over the page box and projected back to CSS pixels for painting and hit-tests.
+  const regionBoxes = useMemo(() => {
+    if (!size.w || !size.h) return [];
+    const out: { id: string; color?: string; rect: MarkRect }[] = [];
+    for (const a of annotations) {
+      if (a.anchor?.kind !== 'region') continue;
+      out.push({
+        id: a.id,
+        color: a.color,
+        rect: {
+          left: a.anchor.x * size.w,
+          top: a.anchor.y * size.h,
+          width: a.anchor.w * size.w,
+          height: a.anchor.h * size.h,
+        },
+      });
+    }
+    return out;
+  }, [annotations, size]);
+
+  // Pointer point relative to the page wrapper's top-left.
+  function wrapPoint(clientX: number, clientY: number) {
+    const o = wrapRef.current?.getBoundingClientRect();
+    return { x: clientX - (o?.left ?? 0), y: clientY - (o?.top ?? 0) };
+  }
+
+  const onRegionPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    const p = wrapPoint(e.clientX, e.clientY);
+    dragRef.current = { x: p.x, y: p.y, moved: false };
+    setDraft(null);
+  };
+
+  const onRegionPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const p = wrapPoint(e.clientX, e.clientY);
+    if (Math.abs(p.x - d.x) > REGION_MIN_DRAG || Math.abs(p.y - d.y) > REGION_MIN_DRAG)
+      d.moved = true;
+    setDraft({
+      left: Math.min(p.x, d.x),
+      top: Math.min(p.y, d.y),
+      width: Math.abs(p.x - d.x),
+      height: Math.abs(p.y - d.y),
+    });
+  };
+
+  const onRegionPointerUp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    const d = dragRef.current;
+    const box = draft;
+    dragRef.current = null;
+    setDraft(null);
+    if (!d) return;
+
+    // A tap (no real drag) selects the region under the point for removal, or
+    // dismisses any open menu when it lands on bare page.
+    if (!d.moved || !box || box.width < REGION_MIN_DRAG || box.height < REGION_MIN_DRAG) {
+      const hit = regionBoxes.find(
+        (b) =>
+          d.x >= b.rect.left &&
+          d.x <= b.rect.left + b.rect.width &&
+          d.y >= b.rect.top &&
+          d.y <= b.rect.top + b.rect.height,
+      );
+      const o = wrapRef.current?.getBoundingClientRect();
+      if (hit && o)
+        onMarkClick?.(
+          hit.id,
+          new DOMRect(o.left + hit.rect.left, o.top + hit.rect.top, hit.rect.width, hit.rect.height),
+        );
+      else onSelect?.(null);
+      return;
+    }
+
+    // A real drag → a new region box, stored normalized to the page box.
+    const W = size.w || 1;
+    const H = size.h || 1;
+    onRegionDraw?.({
+      kind: 'region',
+      x: box.left / W,
+      y: box.top / H,
+      w: box.width / W,
+      h: box.height / H,
+    });
+  };
+
   return (
     <div ref={wrapRef} className="relative">
       <canvas
@@ -271,8 +388,51 @@ export default function PdfPage({
           )),
         )}
       </div>
-      {/* Transparent, selectable glyph boxes aligned over the canvas (on top). */}
-      <div ref={textRef} className="textLayer" />
+      {/* Persisted region-box highlights (issue #12), painted under the drawing
+          surface so a scanned page reads like a marked-up page. */}
+      {regionMode && (
+        <div className="regionLayer" aria-hidden>
+          {regionBoxes.map((b) => (
+            <div
+              key={b.id}
+              className="regionBox"
+              style={{
+                left: b.rect.left,
+                top: b.rect.top,
+                width: b.rect.width,
+                height: b.rect.height,
+                background: b.color,
+              }}
+            />
+          ))}
+          {draft && (
+            <div
+              className="regionDraft"
+              style={{
+                left: draft.left,
+                top: draft.top,
+                width: draft.width,
+                height: draft.height,
+              }}
+            />
+          )}
+        </div>
+      )}
+      {/* Transparent, selectable glyph boxes aligned over the canvas (on top). On
+          a scanned page (region mode) this same surface captures the drag that
+          draws a region box instead of a text selection. */}
+      <div
+        ref={textRef}
+        className="textLayer"
+        onPointerDown={regionMode ? onRegionPointerDown : undefined}
+        onPointerMove={regionMode ? onRegionPointerMove : undefined}
+        onPointerUp={regionMode ? onRegionPointerUp : undefined}
+        // Keep a region drag on a touch device from bubbling to the surface's
+        // swipe handler (which would turn the page mid-draw).
+        onTouchStart={regionMode ? (e) => e.stopPropagation() : undefined}
+        onTouchEnd={regionMode ? (e) => e.stopPropagation() : undefined}
+        style={regionMode ? { cursor: 'crosshair', userSelect: 'none', touchAction: 'none' } : undefined}
+      />
       {/* Margin note flags (issue #10), above the text layer so they're clickable.
           The container is click-through; only the flags catch pointer events, and
           they sit in the page's right margin so they don't block selection. */}
