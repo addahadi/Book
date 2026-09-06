@@ -172,7 +172,7 @@ export default function PdfPage({
     const origin = wrap.getBoundingClientRect();
     const out: RenderedMark[] = [];
     for (const a of annotations) {
-      if (a.anchor.kind !== 'text') continue; // region marks are issue #12
+      if (a.anchor?.kind !== 'text') continue; // bookmarks/region marks aren't text runs
       const range = anchorToRange(index, a.anchor);
       if (!range) continue;
       const rects = [...range.getClientRects()]
@@ -244,12 +244,24 @@ export default function PdfPage({
     return null;
   }
 
+  // A page-level bookmark (issue #11), if this page carries one — drawn as a
+  // colour-coded dog-ear folded into the page's top-right corner.
+  const bookmark = annotations.find((a) => a.type === 'bookmark');
+
   return (
     <div ref={wrapRef} className="relative">
       <canvas
         ref={canvasRef}
         className="pdf-page block rounded shadow-lg ring-1 ring-black/10 dark:ring-white/10"
       />
+      {bookmark && (
+        <div
+          className="dogEar"
+          aria-hidden
+          title={bookmark.label ? `Bookmark: ${bookmark.label}` : 'Bookmarked'}
+          style={{ borderTopColor: bookmark.color ?? '#facc15' }}
+        />
+      )}
       {/* Persisted marks, painted UNDER the text layer (click-through) so they
           never block selection; removal is a tap hit-test on the text layer. */}
       <div className="markLayer" aria-hidden>

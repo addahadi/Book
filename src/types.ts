@@ -43,7 +43,9 @@ export type Annotation = {
   bookId: string;
   type: AnnotationType;
   page: number;
-  anchor: TextAnchor | RegionRect;
+  // Text range (born-digital) or box (scanned). Absent for page-level marks —
+  // a bookmark (issue #11) is identified by `page` alone, no in-page anchor.
+  anchor?: TextAnchor | RegionRect;
   color?: string;
   note?: string; // margin note / reflection body
   label?: string; // for bookmarks

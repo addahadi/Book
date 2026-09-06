@@ -3,6 +3,7 @@ import PdfPage, { type Selection } from './PdfPage';
 import PositionIndicator from './PositionIndicator';
 import SelectionMenu from './SelectionMenu';
 import NoteEditor from './NoteEditor';
+import BookmarkControls from './BookmarkControls';
 import { usePdfDocument } from './usePdfDocument';
 import { getBook, saveBookPosition } from '../db/library';
 import {
@@ -11,7 +12,7 @@ import {
   removeAnnotation,
   updateAnnotation,
 } from '../db/annotations';
-import { UNDERLINE_COLOR, STRIKE_COLOR } from './marks';
+import { UNDERLINE_COLOR, STRIKE_COLOR, HIGHLIGHT_COLORS } from './marks';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
@@ -58,6 +59,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     setBandTops,
     nextPage,
     prevPage,
+    goToPage,
     restorePosition,
   } = useReader();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -97,6 +99,39 @@ export default function Reader({ bookId }: { bookId: string }) {
   // (which fires from an unmount cleanup) can read them without re-subscribing.
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  // Every bookmark in the book (issue #11), in page order, for the jump list.
+  const bookmarks = useMemo(
+    () => annotations.filter((a) => a.type === 'bookmark').sort((a, b) => a.page - b.page),
+    [annotations],
+  );
+
+  // Bookmark the current page: a page-level mark (no in-page anchor), default
+  // colour, unnamed. No-op if this page is already bookmarked.
+  const addBookmark = useCallback(() => {
+    if (annotationsRef.current.some((a) => a.type === 'bookmark' && a.page === currentPage)) return;
+    const mark: Annotation = {
+      id: crypto.randomUUID(),
+      bookId,
+      type: 'bookmark',
+      page: currentPage,
+      color: HIGHLIGHT_COLORS[0].value,
+      createdAt: Date.now(),
+      tags: [],
+      links: [],
+    };
+    addAnnotation(mark).catch(() => {});
+    setAnnotations((prev) => [...prev, mark]);
+  }, [bookId, currentPage]);
+
+  const updateBookmark = useCallback((id: string, changes: { label?: string; color?: string }) => {
+    updateAnnotation(id, changes).catch(() => {});
+    setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...changes } : a)));
+  }, []);
+
+  const removeBookmark = useCallback((id: string) => {
+    removeAnnotation(id).catch(() => {});
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   // A live selection awaiting a mark choice, and an existing mark awaiting a
   // remove confirmation — the two floating menus. Both carry the on-screen rect
@@ -137,7 +172,7 @@ export default function Reader({ bookId }: { bookId: string }) {
         (a) =>
           a.page === currentPage &&
           a.type === type &&
-          a.anchor.kind === 'text' &&
+          a.anchor?.kind === 'text' &&
           a.anchor.startOffset === anchor.startOffset &&
           a.anchor.endOffset === anchor.endOffset,
       );
@@ -448,6 +483,14 @@ export default function Reader({ bookId }: { bookId: string }) {
           >
             {theme === 'dark' ? '☀' : '☾'}
           </button>
+          <BookmarkControls
+            bookmarks={bookmarks}
+            currentPage={currentPage}
+            onAdd={addBookmark}
+            onUpdate={updateBookmark}
+            onRemove={removeBookmark}
+            onJump={goToPage}
+          />
           <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
             page {currentPage}
             {numPages ? ` of ${numPages}` : ''}

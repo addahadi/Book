@@ -150,3 +150,24 @@ body {
   background: #fcd34d;
   border-color: rgba(255, 255, 255, 0.15);
 }
+
+/*
+ * Dog-ear (issue #11) — a colour-coded folded corner marking a bookmarked page.
+ * A CSS triangle pinned to the page's top-right corner: the top border carries
+ * the bookmark colour (set inline), the left border is transparent so the fold
+ * reads as a diagonal. Purely decorative and click-through; toggling lives in
+ * the header. Not `.pdf-page`, so night mode's invert leaves the colour true.
+ */
+.dogEar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 30px solid #facc15;
+  border-left: 30px solid transparent;
+  border-top-right-radius: 4px;
+  z-index: 4;
+  pointer-events: none;
+  filter: drop-shadow(-1px 1px 1px rgba(0, 0, 0, 0.25));
+}
