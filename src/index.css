@@ -107,3 +107,46 @@ body {
   z-index: 1;
   pointer-events: none;
 }
+
+/*
+ * Margin note flags (issue #10). The layer sits ABOVE the text layer so a flag
+ * is clickable, but is itself click-through — only the flags opt back into
+ * pointer events. Flags are pinned to the page's right margin, so they rarely
+ * cover selectable text. Not `.pdf-page`, so night mode's invert leaves them be.
+ */
+.noteLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.noteFlag {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  color: #78350f;
+  background: #fde68a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.noteFlag:hover {
+  background: #fcd34d;
+}
+
+.dark .noteFlag {
+  color: #451a03;
+  background: #fcd34d;
+  border-color: rgba(255, 255, 255, 0.15);
+}

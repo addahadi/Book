@@ -15,6 +15,9 @@ export const HIGHLIGHT_COLORS = [
 // Default ink for underline / strikethrough (drawn as a solid line, not a wash).
 export const UNDERLINE_COLOR = '#2563eb';
 export const STRIKE_COLOR = '#dc2626';
+// A standalone margin note (issue #10) marks its run with a subtle dotted line
+// — enough to show what the note refers to without competing with highlights.
+export const NOTE_COLOR = '#a855f7';
 
 // A single line-rect of a mark, positioned relative to the page wrapper.
 export type MarkRect = { left: number; top: number; width: number; height: number };
@@ -41,6 +44,15 @@ export function markRectStyle(
       top: r.top + r.height - 2,
       height: 2,
       background: color ?? UNDERLINE_COLOR,
+    };
+  }
+  if (type === 'note') {
+    // A dotted underline pins the note to its run, distinct from a solid underline.
+    return {
+      ...base,
+      top: r.top + r.height - 2,
+      height: 0,
+      borderTop: `2px dotted ${color ?? NOTE_COLOR}`,
     };
   }
   // strike

@@ -2,14 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PdfPage, { type Selection } from './PdfPage';
 import PositionIndicator from './PositionIndicator';
 import SelectionMenu from './SelectionMenu';
+import NoteEditor from './NoteEditor';
 import { usePdfDocument } from './usePdfDocument';
 import { getBook, saveBookPosition } from '../db/library';
-import { addAnnotation, listAnnotations, removeAnnotation } from '../db/annotations';
+import {
+  addAnnotation,
+  listAnnotations,
+  removeAnnotation,
+  updateAnnotation,
+} from '../db/annotations';
 import { UNDERLINE_COLOR, STRIKE_COLOR } from './marks';
 import { useLibrary } from '../store/library';
 import { useReader } from '../store/reader';
 import { useTheme } from '../store/theme';
-import type { Annotation, AnnotationType } from '../types';
+import type { Annotation, AnnotationType, TextAnchor } from '../types';
+
+// The note editor's target: a brand-new note over a just-selected run (not yet
+// persisted — a draft), or an existing annotation being edited. Keeping a new
+// note as a draft until it has content means an empty, abandoned note never
+// leaves a phantom mark behind (and survives StrictMode's mount/unmount cycle).
+type NoteTarget =
+  | { mode: 'new'; anchor: TextAnchor; rect: DOMRect }
+  | { mode: 'existing'; id: string; rect: DOMRect };
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
@@ -79,21 +93,36 @@ export default function Reader({ bookId }: { bookId: string }) {
     () => annotations.filter((a) => a.page === currentPage),
     [annotations, currentPage],
   );
+  // Latest annotations mirrored into a ref so the note-editor's commit-on-close
+  // (which fires from an unmount cleanup) can read them without re-subscribing.
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
 
   // A live selection awaiting a mark choice, and an existing mark awaiting a
   // remove confirmation — the two floating menus. Both carry the on-screen rect
   // they anchor to.
   const [pendingSel, setPendingSel] = useState<Selection | null>(null);
   const [pendingRemove, setPendingRemove] = useState<{ id: string; rect: DOMRect } | null>(null);
+  // The margin note open in the editor (issue #10), if any.
+  const [editingNote, setEditingNote] = useState<NoteTarget | null>(null);
 
   const onSelect = useCallback((selection: Selection | null) => {
     setPendingRemove(null);
+    setEditingNote(null);
     setPendingSel(selection);
   }, []);
 
   const onMarkClick = useCallback((id: string, rect: DOMRect) => {
     setPendingSel(null);
+    setEditingNote(null);
     setPendingRemove({ id, rect });
+  }, []);
+
+  // A margin note flag (or an existing mark's "Note") was tapped → edit it.
+  const onNoteClick = useCallback((id: string, rect: DOMRect) => {
+    setPendingSel(null);
+    setPendingRemove(null);
+    setEditingNote({ mode: 'existing', id, rect });
   }, []);
 
   // Apply a mark to the pending selection: highlight in a colour, or underline /
@@ -156,10 +185,87 @@ export default function Reader({ bookId }: { bookId: string }) {
     setPendingRemove(null);
   }, []);
 
+  // Start a fresh margin note over the pending selection. Nothing is persisted
+  // yet — the editor opens on a draft carrying the run's anchor, and the `note`
+  // annotation is created only if the user actually writes something.
+  const addNoteToSelection = useCallback(() => {
+    if (!pendingSel) return;
+    const { anchor, rect } = pendingSel;
+    window.getSelection()?.removeAllRanges();
+    setPendingSel(null);
+    setEditingNote({ mode: 'new', anchor, rect });
+  }, [pendingSel]);
+
+  // Commit the editor's body to the sidecar for a specific target. The target is
+  // bound by the editor's render (not read from live state), so the unmount
+  // auto-save still commits correctly even though a click-away has already
+  // cleared `editingNote`. A new note is created only when non-empty; editing an
+  // existing note updates it, or — when emptied — drops a standalone note /
+  // strips the body off a highlight. Unchanged or empty-new bodies are no-ops,
+  // so a StrictMode mount/unmount double-invoke can't create or delete anything
+  // spuriously, and a duplicate create can't slip through.
+  const commitNote = useCallback(
+    (target: NoteTarget, body: string) => {
+      const text = body.trim();
+
+      if (target.mode === 'new') {
+        if (!text) return;
+        const mark: Annotation = {
+          id: crypto.randomUUID(),
+          bookId,
+          type: 'note',
+          page: currentPage,
+          anchor: target.anchor,
+          note: text,
+          createdAt: Date.now(),
+          tags: [],
+          links: [],
+        };
+        addAnnotation(mark).catch(() => {});
+        setAnnotations((prev) => [...prev, mark]);
+        return;
+      }
+
+      const ann = annotationsRef.current.find((a) => a.id === target.id);
+      if (!ann) return;
+      if (!text) {
+        if (ann.type === 'note') {
+          removeAnnotation(target.id).catch(() => {});
+          setAnnotations((prev) => prev.filter((a) => a.id !== target.id));
+        } else if (ann.note) {
+          updateAnnotation(target.id, { note: '' }).catch(() => {});
+          setAnnotations((prev) => prev.map((a) => (a.id === target.id ? { ...a, note: '' } : a)));
+        }
+        return;
+      }
+      if (ann.note === text) return; // unchanged
+      updateAnnotation(target.id, { note: text }).catch(() => {});
+      setAnnotations((prev) => prev.map((a) => (a.id === target.id ? { ...a, note: text } : a)));
+    },
+    [bookId, currentPage],
+  );
+
+  // Delete from the editor: a draft simply closes; a standalone note is removed
+  // outright; a note on a highlight is stripped but the highlight is kept.
+  const deleteNote = useCallback((target: NoteTarget) => {
+    if (target.mode === 'new') return;
+    const ann = annotationsRef.current.find((a) => a.id === target.id);
+    if (!ann) return;
+    if (ann.type === 'note') {
+      removeAnnotation(target.id).catch(() => {});
+      setAnnotations((prev) => prev.filter((a) => a.id !== target.id));
+    } else {
+      updateAnnotation(target.id, { note: '' }).catch(() => {});
+      setAnnotations((prev) => prev.map((a) => (a.id === target.id ? { ...a, note: '' } : a)));
+    }
+  }, []);
+
   // A turn (page or band) moves the text out from under the menus — dismiss them.
+  // Clearing the note editor unmounts it, which auto-saves the open note.
   useEffect(() => {
     setPendingSel(null);
     setPendingRemove(null);
+    setEditingNote(null);
   }, [currentPage, pageOffset]);
 
   // Load this book's bytes and restore its saved position (issue #07) so every
@@ -293,9 +399,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   const onSurfacePointerUp = () => {
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
-    if (pendingSel || pendingRemove) {
+    if (pendingSel || pendingRemove || editingNote) {
       setPendingSel(null);
       setPendingRemove(null);
+      setEditingNote(null); // unmount → auto-saves the open note
     }
   };
 
@@ -394,6 +501,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 onHeight={onHeight}
                 onSelect={onSelect}
                 onMarkClick={onMarkClick}
+                onNoteClick={onNoteClick}
               />
             </div>
           </div>
@@ -405,10 +513,29 @@ export default function Reader({ bookId }: { bookId: string }) {
           onHighlight={(color) => createMark('highlight', color)}
           onUnderline={() => createMark('underline', UNDERLINE_COLOR)}
           onStrike={() => createMark('strike', STRIKE_COLOR)}
+          onNote={addNoteToSelection}
         />
       )}
       {pendingRemove && (
-        <SelectionMenu rect={pendingRemove.rect} onRemove={() => removeMark(pendingRemove.id)} />
+        <SelectionMenu
+          rect={pendingRemove.rect}
+          onRemove={() => removeMark(pendingRemove.id)}
+          onNote={() => onNoteClick(pendingRemove.id, pendingRemove.rect)}
+        />
+      )}
+      {editingNote && (
+        <NoteEditor
+          key={editingNote.mode === 'existing' ? editingNote.id : 'new'}
+          rect={editingNote.rect}
+          initial={
+            editingNote.mode === 'existing'
+              ? (annotations.find((a) => a.id === editingNote.id)?.note ?? '')
+              : ''
+          }
+          onCommit={(body) => commitNote(editingNote, body)}
+          onDelete={() => deleteNote(editingNote)}
+          onClose={() => setEditingNote(null)}
+        />
       )}
       <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">
         <PositionIndicator />

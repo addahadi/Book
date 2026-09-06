@@ -16,6 +16,14 @@ export async function addAnnotation(annotation: Annotation): Promise<void> {
   await db.annotations.add(annotation);
 }
 
+/** Patch fields on an existing mark (e.g. a margin note body — issue #10). */
+export async function updateAnnotation(
+  id: string,
+  changes: Partial<Annotation>,
+): Promise<void> {
+  await db.annotations.update(id, changes);
+}
+
 /** Remove a mark by id. */
 export async function removeAnnotation(id: string): Promise<void> {
   await db.annotations.delete(id);

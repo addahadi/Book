@@ -33,9 +33,23 @@ type Props = {
   onSelect?: (selection: Selection | null) => void;
   /** Fired when an existing mark is clicked, with its on-screen rect. */
   onMarkClick?: (id: string, rect: DOMRect) => void;
+  /** Fired when a margin note flag is clicked, with the flag's on-screen rect. */
+  onNoteClick?: (id: string, rect: DOMRect) => void;
 };
 
-type RenderedMark = { id: string; type: Annotation['type']; color?: string; rects: MarkRect[] };
+type RenderedMark = {
+  id: string;
+  type: Annotation['type'];
+  color?: string;
+  note?: string;
+  rects: MarkRect[];
+};
+
+// Whether a mark carries a margin note worth flagging — a standalone note, or a
+// highlight/underline/strike with note text attached (issue #10).
+function hasNote(m: RenderedMark): boolean {
+  return m.type === 'note' || !!(m.note && m.note.length > 0);
+}
 
 // Renders a whole PDF page to a canvas at a given CSS width (fit-width), with a
 // pdf.js text layer aligned over it for selection, and a mark layer over that
@@ -51,6 +65,7 @@ export default function PdfPage({
   onHeight,
   onSelect,
   onMarkClick,
+  onNoteClick,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -168,7 +183,8 @@ export default function PdfPage({
           width: r.width,
           height: r.height,
         }));
-      if (rects.length) out.push({ id: a.id, type: a.type, color: a.color, rects });
+      if (rects.length)
+        out.push({ id: a.id, type: a.type, color: a.color, note: a.note, rects });
     }
     setMarks(out);
   }, [index, annotations]);
@@ -245,6 +261,32 @@ export default function PdfPage({
       </div>
       {/* Transparent, selectable glyph boxes aligned over the canvas (on top). */}
       <div ref={textRef} className="textLayer" />
+      {/* Margin note flags (issue #10), above the text layer so they're clickable.
+          The container is click-through; only the flags catch pointer events, and
+          they sit in the page's right margin so they don't block selection. */}
+      <div className="noteLayer" aria-hidden>
+        {marks.filter(hasNote).map((m) => {
+          const top = Math.min(...m.rects.map((r) => r.top));
+          return (
+            <button
+              key={`note:${m.id}`}
+              type="button"
+              aria-label="Open note"
+              title="Open note"
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNoteClick?.(m.id, (e.currentTarget as HTMLElement).getBoundingClientRect());
+              }}
+              className="noteFlag"
+              style={{ top }}
+            >
+              ✎
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
