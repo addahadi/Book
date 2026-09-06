@@ -684,6 +684,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       {notebookOpen && (
         <NotebookPanel
           annotations={annotations}
+          bookTitle={title}
           currentPage={currentPage}
           onJump={(page) => {
             goToPage(page);

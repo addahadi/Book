@@ -19,6 +19,25 @@ export const STRIKE_COLOR = '#dc2626';
 // — enough to show what the note refers to without competing with highlights.
 export const NOTE_COLOR = '#a855f7';
 
+// The ink a mark is drawn in — its own colour, or the type's default when it
+// carries none (underline / strike / standalone note). Also what the Notebook
+// tags an entry with, what the colour filter matches on, and the swatch the
+// detail view shows (issues #13, #14).
+export function inkOf(a: Annotation): string {
+  if (a.color) return a.color;
+  if (a.type === 'underline') return UNDERLINE_COLOR;
+  if (a.type === 'strike') return STRIKE_COLOR;
+  if (a.type === 'note') return NOTE_COLOR;
+  return HIGHLIGHT_COLORS[0].value;
+}
+
+// The human name for a highlight colour, or the raw value when it's off-palette
+// (an underline/strike/note default), or an em dash when there's no colour.
+export function colorName(value?: string): string {
+  if (!value) return '—';
+  return HIGHLIGHT_COLORS.find((c) => c.value === value)?.name ?? value;
+}
+
 // A single line-rect of a mark, positioned relative to the page wrapper.
 export type MarkRect = { left: number; top: number; width: number; height: number };
 

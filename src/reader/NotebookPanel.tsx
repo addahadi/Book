@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { HIGHLIGHT_COLORS, NOTE_COLOR, STRIKE_COLOR, UNDERLINE_COLOR } from './marks';
+import { HIGHLIGHT_COLORS, inkOf } from './marks';
+import AnnotationDetail from './AnnotationDetail';
 import type { Annotation } from '../types';
 
 // The per-book Notebook (issue #13): every highlight, note, and bookmark in the
@@ -10,9 +11,11 @@ import type { Annotation } from '../types';
 type Props = {
   /** Every annotation in the book (unsorted; this panel orders them). */
   annotations: Annotation[];
+  /** The book's title, shown in an entry's detail view (issue #14). */
+  bookTitle: string;
   /** The page currently being read, flagged in the list for a sense of place. */
   currentPage: number;
-  /** Jump to an entry's page. */
+  /** Jump to an entry's page (fired from a detail view's "Go to source"). */
   onJump: (page: number) => void;
   /** Close the panel. */
   onClose: () => void;
@@ -27,18 +30,7 @@ function positionOf(a: Annotation): number {
   return -1;
 }
 
-// The ink a mark is drawn in — its own colour, or the type's default when it
-// carries none (underline / strike / standalone note). Also the stripe + swatch
-// colour a Notebook entry is tagged with, and what the colour filter matches on.
-function inkOf(a: Annotation): string {
-  if (a.color) return a.color;
-  if (a.type === 'underline') return UNDERLINE_COLOR;
-  if (a.type === 'strike') return STRIKE_COLOR;
-  if (a.type === 'note') return NOTE_COLOR;
-  return HIGHLIGHT_COLORS[0].value;
-}
-
-const TYPE_LABEL: Record<Annotation['type'], string> = {
+export const TYPE_LABEL: Record<Annotation['type'], string> = {
   highlight: 'Highlight',
   underline: 'Underline',
   strike: 'Strikethrough',
@@ -57,8 +49,8 @@ function entryText(a: Annotation): string {
 }
 
 // A small, crisp type icon in the mark's ink, so entries are distinguishable at
-// a glance without relying on colour alone.
-function TypeIcon({ type, ink }: { type: Annotation['type']; ink: string }) {
+// a glance without relying on colour alone. Shared with the detail view (#14).
+export function TypeIcon({ type, ink }: { type: Annotation['type']; ink: string }) {
   const common = { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': true } as const;
   switch (type) {
     case 'highlight':
@@ -102,18 +94,32 @@ function TypeIcon({ type, ink }: { type: Annotation['type']; ink: string }) {
   }
 }
 
-export default function NotebookPanel({ annotations, currentPage, onJump, onClose }: Props) {
+export default function NotebookPanel({
+  annotations,
+  bookTitle,
+  currentPage,
+  onJump,
+  onClose,
+}: Props) {
   // The active colour filter (a highlight-colour hex), or null for "all".
   const [filter, setFilter] = useState<string | null>(null);
+  // The entry whose detail view is open (issue #14), addressed by its stable id,
+  // or null while the list is showing. Resolved against live state, so a mark
+  // removed elsewhere drops us cleanly back to the list.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
 
-  // Escape closes the panel, matching the other floating surfaces.
+  // Escape steps back: from a detail view to the list, then out of the panel —
+  // matching the other floating surfaces.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (selectedId) setSelectedId(null);
+      else onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, selectedId]);
 
   // Reading order — page, then in-page position, then creation as a stable
   // tiebreak — grouped under a per-page heading. Recomputed whenever the sidecar
@@ -142,6 +148,15 @@ export default function NotebookPanel({ annotations, currentPage, onJump, onClos
         aria-label="Notebook"
         className="fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col border-l border-black/10 bg-white text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-stone-800 dark:text-stone-100"
       >
+        {selected ? (
+          <AnnotationDetail
+            annotation={selected}
+            bookTitle={bookTitle}
+            onBack={() => setSelectedId(null)}
+            onGoToSource={onJump}
+          />
+        ) : (
+          <>
         <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 dark:border-white/10">
           <div className="flex items-baseline gap-2">
             <h2 className="text-base font-semibold">Notebook</h2>
@@ -227,7 +242,7 @@ export default function NotebookPanel({ annotations, currentPage, onJump, onClos
                     <button
                       key={a.id}
                       type="button"
-                      onClick={() => onJump(a.page)}
+                      onClick={() => setSelectedId(a.id)}
                       style={{ borderLeftColor: ink }}
                       className="flex w-full items-start gap-3 border-l-[3px] px-4 py-2.5 text-left hover:bg-black/5 dark:hover:bg-white/5"
                     >
@@ -265,6 +280,8 @@ export default function NotebookPanel({ annotations, currentPage, onJump, onClos
             ))
           )}
         </div>
+          </>
+        )}
       </aside>
     </>
   );
