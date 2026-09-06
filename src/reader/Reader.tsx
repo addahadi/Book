@@ -5,7 +5,7 @@ import SelectionMenu from './SelectionMenu';
 import NoteEditor from './NoteEditor';
 import BookmarkControls from './BookmarkControls';
 import { usePdfDocument } from './usePdfDocument';
-import { getBook, saveBookPosition } from '../db/library';
+import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
   addAnnotation,
   listAnnotations,
@@ -371,6 +371,24 @@ export default function Reader({ bookId }: { bookId: string }) {
   useEffect(() => {
     if (doc) setNumPages(doc.numPages);
   }, [doc, setNumPages]);
+
+  // Self-heal a book wrongly flagged as scanned (issue #12). Page-1-only
+  // detection misreads a born-digital book behind an image cover (e.g. DDIA,
+  // whose text starts on page 3) as having no text layer, which would block
+  // selection. Once the doc is open, re-check across its early pages and, if it
+  // really has text, flip region mode off and correct the stored flag.
+  useEffect(() => {
+    if (!doc || hasTextLayer) return; // only a book currently treated as scanned
+    let cancelled = false;
+    reconcileTextLayer(bookId, doc, false)
+      .then((has) => {
+        if (!cancelled && has) setHasTextLayer(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, hasTextLayer, bookId]);
 
   // Persist the reading position for auto-resume (issue #07). Debounced so
   // band-by-band turning doesn't hammer IndexedDB, and gated on `resumed` so it
