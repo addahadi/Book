@@ -4,6 +4,7 @@ import PositionIndicator from './PositionIndicator';
 import SelectionMenu from './SelectionMenu';
 import NoteEditor from './NoteEditor';
 import BookmarkControls from './BookmarkControls';
+import NotebookPanel from './NotebookPanel';
 import { usePdfDocument } from './usePdfDocument';
 import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
@@ -145,6 +146,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [pendingRemove, setPendingRemove] = useState<{ id: string; rect: DOMRect } | null>(null);
   // The margin note open in the editor (issue #10), if any.
   const [editingNote, setEditingNote] = useState<NoteTarget | null>(null);
+  // Whether the Notebook panel (issue #13) — the book-wide list of every mark —
+  // is open.
+  const [notebookOpen, setNotebookOpen] = useState(false);
 
   const onSelect = useCallback((selection: Selection | null) => {
     setPendingRemove(null);
@@ -539,6 +543,30 @@ export default function Reader({ bookId }: { bookId: string }) {
             onRemove={removeBookmark}
             onJump={goToPage}
           />
+          <button
+            type="button"
+            onClick={() => setNotebookOpen((o) => !o)}
+            aria-pressed={notebookOpen}
+            aria-label="Notebook"
+            title="Notebook — all highlights, notes & bookmarks"
+            className="flex items-center gap-1 rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="block">
+              <path
+                d="M4 2h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+              <path d="M3 5.5h1.5M3 8h1.5M3 10.5h1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            {annotations.length > 0 && (
+              <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+                {annotations.length}
+              </span>
+            )}
+          </button>
           <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
             page {currentPage}
             {numPages ? ` of ${numPages}` : ''}
@@ -651,6 +679,17 @@ export default function Reader({ bookId }: { bookId: string }) {
           onCommit={(body) => commitNote(editingNote, body)}
           onDelete={() => deleteNote(editingNote)}
           onClose={() => setEditingNote(null)}
+        />
+      )}
+      {notebookOpen && (
+        <NotebookPanel
+          annotations={annotations}
+          currentPage={currentPage}
+          onJump={(page) => {
+            goToPage(page);
+            setNotebookOpen(false);
+          }}
+          onClose={() => setNotebookOpen(false)}
         />
       )}
       <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">

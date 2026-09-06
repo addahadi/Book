@@ -1,0 +1,271 @@
+import { useEffect, useMemo, useState } from 'react';
+import { HIGHLIGHT_COLORS, NOTE_COLOR, STRIKE_COLOR, UNDERLINE_COLOR } from './marks';
+import type { Annotation } from '../types';
+
+// The per-book Notebook (issue #13): every highlight, note, and bookmark in the
+// book, listed in reading order (page, then position on the page). Clicking an
+// entry jumps to its page; the list can be narrowed to a single highlight colour.
+// Presentational — the annotation sidecar lives in the parent (Reader), so the
+// list updates live as marks are added or removed, with no fetch of its own.
+type Props = {
+  /** Every annotation in the book (unsorted; this panel orders them). */
+  annotations: Annotation[];
+  /** The page currently being read, flagged in the list for a sense of place. */
+  currentPage: number;
+  /** Jump to an entry's page. */
+  onJump: (page: number) => void;
+  /** Close the panel. */
+  onClose: () => void;
+};
+
+// A mark's position within its page, for the secondary sort. Text runs order by
+// character offset; region boxes by their top edge. A page-level bookmark has no
+// in-page anchor, so it sorts to the very top of its page.
+function positionOf(a: Annotation): number {
+  if (a.anchor?.kind === 'text') return a.anchor.startOffset;
+  if (a.anchor?.kind === 'region') return a.anchor.y;
+  return -1;
+}
+
+// The ink a mark is drawn in — its own colour, or the type's default when it
+// carries none (underline / strike / standalone note). Also the stripe + swatch
+// colour a Notebook entry is tagged with, and what the colour filter matches on.
+function inkOf(a: Annotation): string {
+  if (a.color) return a.color;
+  if (a.type === 'underline') return UNDERLINE_COLOR;
+  if (a.type === 'strike') return STRIKE_COLOR;
+  if (a.type === 'note') return NOTE_COLOR;
+  return HIGHLIGHT_COLORS[0].value;
+}
+
+const TYPE_LABEL: Record<Annotation['type'], string> = {
+  highlight: 'Highlight',
+  underline: 'Underline',
+  strike: 'Strikethrough',
+  note: 'Note',
+  bookmark: 'Bookmark',
+  region: 'Region',
+};
+
+// The line of text an entry shows: the quoted run for text marks, the note body
+// for a standalone note, the label (or page) for a bookmark.
+function entryText(a: Annotation): string {
+  if (a.type === 'note') return a.note || 'Empty note';
+  if (a.type === 'bookmark') return a.label || `Page ${a.page}`;
+  if (a.type === 'region') return 'Region highlight';
+  return a.anchor?.kind === 'text' ? (a.anchor.quote ?? '') : '';
+}
+
+// A small, crisp type icon in the mark's ink, so entries are distinguishable at
+// a glance without relying on colour alone.
+function TypeIcon({ type, ink }: { type: Annotation['type']; ink: string }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': true } as const;
+  switch (type) {
+    case 'highlight':
+      return (
+        <svg {...common}>
+          <rect x="2" y="4" width="12" height="8" rx="1.5" fill={ink} />
+        </svg>
+      );
+    case 'underline':
+      return (
+        <svg {...common} fill="none" stroke={ink} strokeLinecap="round">
+          <path d="M4 3v4a4 4 0 0 0 8 0V3" strokeWidth="1.4" />
+          <path d="M3 13h10" strokeWidth="1.6" />
+        </svg>
+      );
+    case 'strike':
+      return (
+        <svg {...common} fill="none" stroke={ink} strokeLinecap="round">
+          <path d="M4 4h8M6 4v3M10 4v3" strokeWidth="1.2" opacity="0.55" />
+          <path d="M3 9h10" strokeWidth="1.6" />
+        </svg>
+      );
+    case 'note':
+      return (
+        <svg {...common} fill="none" stroke={ink} strokeLinejoin="round" strokeLinecap="round">
+          <path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10z" strokeWidth="1.3" />
+        </svg>
+      );
+    case 'bookmark':
+      return (
+        <svg {...common} fill="none" stroke={ink} strokeLinejoin="round">
+          <path d="M4 2h8a1 1 0 0 1 1 1v11l-5-3.2L3 14V3a1 1 0 0 1 1-1z" strokeWidth="1.3" fill={ink} />
+        </svg>
+      );
+    case 'region':
+      return (
+        <svg {...common} fill="none" stroke={ink}>
+          <rect x="2.5" y="3.5" width="11" height="9" rx="1" strokeWidth="1.3" strokeDasharray="2.4 2" />
+        </svg>
+      );
+  }
+}
+
+export default function NotebookPanel({ annotations, currentPage, onJump, onClose }: Props) {
+  // The active colour filter (a highlight-colour hex), or null for "all".
+  const [filter, setFilter] = useState<string | null>(null);
+
+  // Escape closes the panel, matching the other floating surfaces.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Reading order — page, then in-page position, then creation as a stable
+  // tiebreak — grouped under a per-page heading. Recomputed whenever the sidecar
+  // changes (add/remove) or the filter narrows the set, so the list stays live.
+  const groups = useMemo(() => {
+    const kept = filter ? annotations.filter((a) => inkOf(a) === filter) : annotations;
+    const sorted = [...kept].sort(
+      (a, b) => a.page - b.page || positionOf(a) - positionOf(b) || a.createdAt - b.createdAt,
+    );
+    const out: { page: number; items: Annotation[] }[] = [];
+    for (const a of sorted) {
+      const last = out[out.length - 1];
+      if (last && last.page === a.page) last.items.push(a);
+      else out.push({ page: a.page, items: [a] });
+    }
+    return out;
+  }, [annotations, filter]);
+
+  const total = annotations.length;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} aria-hidden />
+      <aside
+        role="dialog"
+        aria-label="Notebook"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col border-l border-black/10 bg-white text-neutral-900 shadow-2xl dark:border-white/10 dark:bg-stone-800 dark:text-stone-100"
+      >
+        <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 dark:border-white/10">
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-base font-semibold">Notebook</h2>
+            <span className="text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+              {total} {total === 1 ? 'entry' : 'entries'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close notebook"
+            className="rounded px-2 py-1 text-neutral-500 ring-1 ring-black/10 hover:bg-black/5 dark:text-neutral-400 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Colour filter: "All", then a swatch per highlight colour. */}
+        <div className="flex items-center gap-2 border-b border-black/10 px-4 py-2 dark:border-white/10">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Filter</span>
+          <button
+            type="button"
+            onClick={() => setFilter(null)}
+            className={`rounded-full px-2 py-0.5 text-xs ring-1 ${
+              filter === null
+                ? 'bg-black/10 ring-black/20 dark:bg-white/15 dark:ring-white/25'
+                : 'ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5'
+            }`}
+          >
+            All
+          </button>
+          <div className="flex items-center gap-1.5">
+            {HIGHLIGHT_COLORS.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => setFilter((f) => (f === c.value ? null : c.value))}
+                aria-label={`Filter by ${c.name}`}
+                aria-pressed={filter === c.value}
+                title={c.name}
+                className="h-5 w-5 rounded-full ring-1 ring-black/15 dark:ring-white/20"
+                style={{
+                  background: c.value,
+                  outline: filter === c.value ? '2px solid currentColor' : 'none',
+                  outlineOffset: 2,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto">
+          {total === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
+              No highlights, notes, or bookmarks yet. Select some text or bookmark a page to start
+              your notebook.
+            </p>
+          ) : groups.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
+              Nothing in this colour.
+            </p>
+          ) : (
+            groups.map((g) => (
+              <section key={g.page}>
+                <div
+                  className={`sticky top-0 flex items-center gap-2 bg-white/95 px-4 py-1.5 text-xs font-medium backdrop-blur dark:bg-stone-800/95 ${
+                    g.page === currentPage
+                      ? 'text-neutral-900 dark:text-stone-100'
+                      : 'text-neutral-500 dark:text-neutral-400'
+                  }`}
+                >
+                  Page {g.page}
+                  {g.page === currentPage && (
+                    <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-normal dark:bg-white/15">
+                      reading
+                    </span>
+                  )}
+                </div>
+                {g.items.map((a) => {
+                  const ink = inkOf(a);
+                  const hasSideNote = a.type !== 'note' && !!a.note;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onJump(a.page)}
+                      style={{ borderLeftColor: ink }}
+                      className="flex w-full items-start gap-3 border-l-[3px] px-4 py-2.5 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <span
+                        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded"
+                        style={{ background: `${ink}22` }}
+                      >
+                        <TypeIcon type={a.type} ink={ink} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                          {TYPE_LABEL[a.type]}
+                          {hasSideNote && <span title="Has a margin note">✎</span>}
+                        </span>
+                        <span
+                          className={`mt-0.5 block break-words text-sm ${
+                            a.type === 'highlight' || a.type === 'underline' || a.type === 'strike'
+                              ? 'italic'
+                              : ''
+                          }`}
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {entryText(a)}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+            ))
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
