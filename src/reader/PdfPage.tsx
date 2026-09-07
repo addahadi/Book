@@ -22,6 +22,39 @@ const MAX_CANVAS_AREA = 16_777_216;
 // A user selection resolved to an anchor plus its on-screen rect (for the menu).
 export type Selection = { anchor: TextAnchor; rect: DOMRect };
 
+// A visual line's vertical extent on the rendered page, in CSS px from the page
+// top. The parent packs line-aware bands from these (issue #20).
+export type LineBox = { top: number; bottom: number };
+
+// Cluster the text layer's per-item spans into visual line boxes. pdf.js gives a
+// span per text *item*, several per line; spans on one line share a vertical
+// band, so we union every span that vertically overlaps the current line into
+// one box. Empty and zero-height spans (markedContent wrappers, EOL markers) are
+// skipped. Positions come from offsetTop/offsetHeight — the untransformed layout
+// box — which is exactly the vertical geometry we band on (pdf.js only ever
+// transforms spans horizontally, via scaleX, to fit width).
+function measureLines(divs: HTMLElement[]): LineBox[] {
+  const boxes: LineBox[] = [];
+  for (const d of divs) {
+    const h = d.offsetHeight;
+    if (h <= 0 || !d.textContent || !d.textContent.trim()) continue;
+    boxes.push({ top: d.offsetTop, bottom: d.offsetTop + h });
+  }
+  boxes.sort((a, b) => a.top - b.top);
+  const lines: LineBox[] = [];
+  for (const b of boxes) {
+    const line = lines[lines.length - 1];
+    // Same visual line when this box vertically overlaps the current line band.
+    if (line && b.top < line.bottom - 1) {
+      line.top = Math.min(line.top, b.top);
+      line.bottom = Math.max(line.bottom, b.bottom);
+    } else {
+      lines.push({ ...b });
+    }
+  }
+  return lines;
+}
+
 type Props = {
   /** Loaded document to render from, or null while it loads. */
   doc: PdfDocument | null;
@@ -34,9 +67,10 @@ type Props = {
   /** Scanned-PDF fallback (issue #12): no text layer, so text selection is off
       and dragging on the page draws a region-box highlight instead. */
   regionMode?: boolean;
-  /** Reports the page's rendered CSS height once drawn, so the parent can
-      compute how many bands it takes and clamp the last one. */
-  onHeight?: (heightCss: number) => void;
+  /** Reports the page's rendered CSS height and its visual line boxes (CSS px
+      from the page top) once drawn, so the parent can pack line-aware bands
+      (issue #20). `lines` is empty for a scanned page (no text layer). */
+  onMeasure?: (pageHeight: number, lines: LineBox[]) => void;
   /** Fired on pointer-up: a resolved selection to mark up, or null to dismiss. */
   onSelect?: (selection: Selection | null) => void;
   /** Fired when an existing mark is clicked, with its on-screen rect. */
@@ -73,7 +107,7 @@ export default function PdfPage({
   width,
   annotations,
   regionMode = false,
-  onHeight,
+  onMeasure,
   onSelect,
   onMarkClick,
   onNoteClick,
@@ -135,12 +169,13 @@ export default function PdfPage({
 
       await pdfPage.render({ canvasContext: ctx, viewport }).promise;
       if (cancelled) return;
-      onHeight?.(heightCss);
       setSize({ w: width, h: heightCss });
 
       // Scanned page (no text layer): skip the selectable text layer entirely —
-      // there are no glyph runs to anchor to. The region layer handles marking.
+      // there are no glyph runs to anchor to. The region layer handles marking,
+      // and with no line boxes the parent falls back to geometric bands.
       if (regionMode) {
+        onMeasure?.(heightCss, []);
         setIndex(null);
         return;
       }
@@ -172,6 +207,9 @@ export default function PdfPage({
       // Re-attach the selection sentinel after swapping in the fresh spans, so
       // dragging a selection stays smooth (see ./textSelection). Idempotent.
       ensureTextLayerRegistered(host);
+      // Measure line boxes now that the spans are live in the DOM, and report
+      // them with the height so the parent can pack line-aware bands (#20).
+      onMeasure?.(heightCss, measureLines(textLayer.textDivs));
       setIndex(buildTextIndex(textLayer.textDivs, textLayer.textContentItemsStr));
     })().catch(() => {
       /* render races are expected during fast turns; ignore. */
@@ -181,7 +219,7 @@ export default function PdfPage({
       cancelled = true;
       textLayer?.cancel();
     };
-  }, [doc, page, width, onHeight, regionMode]);
+  }, [doc, page, width, onMeasure, regionMode]);
 
   // Detach this page's text layer from the global selection-smoothing registry
   // on unmount (the render effect re-registers on every re-render).

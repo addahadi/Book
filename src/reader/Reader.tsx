@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import PdfPage, { type Selection } from './PdfPage';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import PdfPage, { type LineBox, type Selection } from './PdfPage';
 import PositionIndicator from './PositionIndicator';
 import SelectionMenu from './SelectionMenu';
 import NoteEditor from './NoteEditor';
@@ -34,8 +34,11 @@ const SWIPE_THRESHOLD = 50;
 const MAX_PAGE_WIDTH = 1000;
 // Horizontal breathing room around the page column, in px (total of both sides).
 const H_GUTTER = 32;
-// Overlap between consecutive bands, as a fraction of the viewport height — a
-// strip of lines repeats across a turn so you don't lose the line at the seam.
+// Geometric fallback step, as a fraction of viewport height: the slide used when
+// line-packing can't advance (a scanned page with no line boxes, or a line /
+// figure gap taller than the viewport). The 1 − 0.12 keeps a 12% strip repeating
+// on those fallback steps so the seam line isn't lost — the same feel scanned
+// pages had before #20. Line-aware bands overlap by exactly one line instead.
 const BAND_OVERLAP = 0.12;
 
 // The index of the last band whose top is at or before `offset`.
@@ -43,6 +46,55 @@ function bandIndexOf(tops: number[], offset: number): number {
   let idx = 0;
   for (let i = 0; i < tops.length; i++) if (tops[i] <= offset + 1e-6) idx = i;
   return idx;
+}
+
+// Pack a page into bands whose seams fall on line boundaries (issue #20).
+//
+// Returns the band tops as page-height fractions (always starting with 0).
+// Greedy: each band holds as many *whole* lines as fit the viewport height
+// `vh`; the next band begins at the last line it showed, so exactly one line
+// repeats across the turn as a continuity handhold. The final band flushes the
+// last line of text to the viewport bottom (leftover blank above, page bottom
+// margin cropped) rather than leaving trailing whitespace.
+//
+// Safety net: when line-packing can't advance — no line boxes at all (scanned
+// page), or the next chunk (a tall line, or a figure gap with no line to break
+// at) exceeds the viewport — that one step falls back to a blind geometric
+// slide. A band is therefore never empty and never overflows.
+function computeBandTops(lines: LineBox[], pageHeight: number, vh: number): number[] {
+  const H = pageHeight;
+  if (!H || !vh || H <= vh) return [0];
+  const n = lines.length;
+  // Bottom of the last line of text (the whole page when there are no lines).
+  const lastBottom = n ? lines[n - 1].bottom : H;
+  // Top that flushes that last line against the viewport bottom.
+  const flushTop = Math.max(0, lastBottom - vh);
+  const step = Math.max(1, vh * (1 - BAND_OVERLAP)); // geometric fallback slide
+  const EPS = 0.5;
+
+  const tops = [0];
+  let cur = 0; // top of the band just added, in px
+  // `cur + vh < lastBottom` means the current band doesn't yet reach the last
+  // line, so another band is needed. The guard is belt-and-braces against a
+  // pathological page — progress is already guaranteed by the step fallback.
+  for (let guard = 0; cur + vh < lastBottom - EPS && guard < 5000; guard++) {
+    // Index of the last whole line fully visible from `cur`.
+    let k = -1;
+    for (let i = 0; i < n; i++) {
+      if (lines[i].top >= cur - EPS && lines[i].bottom <= cur + vh + EPS) k = i;
+    }
+    // Next band repeats line k (one-line overlap); fall back to a geometric
+    // slide when there's no whole line to show, or repeating wouldn't advance.
+    let next = k === -1 ? cur + step : lines[k].top;
+    if (next <= cur + EPS) next = cur + step;
+    if (next >= flushTop - EPS) {
+      tops.push(flushTop / H); // final band: flush the last line to the bottom
+      break;
+    }
+    tops.push(next / H);
+    cur = next;
+  }
+  return tops;
 }
 
 // The paginated reader for one open book. A page is fit to the viewport width;
@@ -75,6 +127,7 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 }); // the clipped reading viewport
   const [pageHeight, setPageHeight] = useState(0); // rendered page CSS height
+  const [lines, setLines] = useState<LineBox[]>([]); // page line boxes (#20)
   // True once this book's saved position has been restored. Gates the persist
   // effect so we never write the pre-restore default back over the saved spot.
   const [resumed, setResumed] = useState(false);
@@ -430,36 +483,39 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   const width = Math.min(Math.max(box.w - H_GUTTER, 0), MAX_PAGE_WIDTH);
 
-  const onHeight = useCallback((h: number) => {
+  // The render layer reports the page's height and its line boxes together once
+  // drawn. Guard the height against sub-pixel jitter so we don't rerun the band
+  // pass for nothing; lines come as a fresh array per render (page change).
+  const onMeasure = useCallback((h: number, ls: LineBox[]) => {
     setPageHeight((prev) => (Math.abs(prev - h) < 0.5 ? prev : h));
+    setLines(ls);
   }, []);
 
-  // Recompute band tops whenever the page's rendered height or the viewport
-  // height changes (new page, resize). The store reconciles the stored offset
-  // so you stay in place across a resize.
+  // Recompute band tops whenever the page's lines, height, or the viewport
+  // height changes (new page, resize). Bands break on line boundaries (#20);
+  // the store reconciles the stored offset so you stay in place across a resize.
   useEffect(() => {
-    const vh = box.h;
-    const H = pageHeight;
-    if (!vh || !H) return;
-    const overlap = vh * BAND_OVERLAP;
-    const step = Math.max(1, vh - overlap);
-    let tops: number[];
-    if (H <= vh) {
-      tops = [0]; // the whole page fits — a single band
-    } else {
-      const count = Math.ceil((H - vh) / step) + 1;
-      tops = [];
-      // Each band top is one step down, but the last clamps flush to the page
-      // bottom so you never land on empty space below the text.
-      for (let i = 0; i < count; i++) tops.push(Math.min(i * step, H - vh) / H);
-    }
-    setBandTops(tops);
-  }, [pageHeight, box.h, currentPage, setBandTops]);
+    if (!box.h || !pageHeight) return;
+    setBandTops(computeBandTops(lines, pageHeight, box.h));
+  }, [lines, pageHeight, box.h, setBandTops]);
 
   // How far to slide the page up to reveal the current band, clamped so the
   // last band sits flush against the page bottom.
   const maxShift = Math.max(0, pageHeight - box.h);
   const shift = Math.min(pageOffset * pageHeight, maxShift);
+
+  // Turn animation, split by meaning (#20). A band turn *within* a page slides
+  // (you watch the one-line overlap travel bottom→top). A turn to a *new* page
+  // must not slide — the content swaps, so animating the transform would drag
+  // the new page in from a stale offset. On the render where `currentPage` just
+  // changed, `prevPageRef` still holds the old page, so `samePage` is false and
+  // we render the jump with no transition; the layout effect then catches the
+  // ref up before the next paint, re-enabling the slide for band turns.
+  const prevPageRef = useRef(currentPage);
+  const samePage = prevPageRef.current === currentPage;
+  useLayoutEffect(() => {
+    prevPageRef.current = currentPage;
+  }, [currentPage]);
 
   const bi = bandIndexOf(bandTops, pageOffset);
   const atStart = currentPage <= 1 && bi === 0;
@@ -626,7 +682,11 @@ export default function Reader({ bookId }: { bookId: string }) {
           // slid up by `shift` to show the current band.
           <div ref={clipRef} className="absolute inset-0 flex items-start justify-center overflow-hidden">
             <div
-              className="ease-out motion-safe:transition-transform motion-safe:duration-300"
+              className={
+                samePage
+                  ? 'ease-out motion-safe:transition-transform motion-safe:duration-200'
+                  : 'ease-out'
+              }
               style={{ width, transform: `translateY(${-shift}px)` }}
             >
               <PdfPage
@@ -635,7 +695,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 width={width}
                 annotations={pageAnnotations}
                 regionMode={!hasTextLayer}
-                onHeight={onHeight}
+                onMeasure={onMeasure}
                 onSelect={onSelect}
                 onMarkClick={onMarkClick}
                 onNoteClick={onNoteClick}

@@ -52,11 +52,15 @@ v1 is validated by the author dogfooding it as a daily reader.
 ### 6.1 Reading surface
 - **Paginated by default.** Pages *turn* (replace the view); they do not scroll.
 - **Layouts:** single page fit to the screen's **width** so text stays readable. A page taller than
-  the screen is read in **bands** — each turn slides the view down one screen-height (with a slight
-  overlap so the line at the seam isn't lost), and the last band clamps flush to the page bottom.
-  This keeps text legible on tall pages while staying inside "pages turn, never scroll." *(Supersedes
-  the original two-page-spread-on-wide default; the open-book spread returns later as an optional
-  "Zoom" reading mode — see issue #06b.)*
+  the screen is read in **bands** that break on **line boundaries** — each turn fills the view with
+  as many whole lines as fit and never bisects a line; one line repeats across the turn as a
+  continuity handhold, and the last band flushes the last line of text to the viewport bottom (its
+  bottom margin cropped, no trailing whitespace). Pages with no text layer (scanned) or tall non-text
+  content (a full-page figure) fall back to a blind screen-height slide for that step, so a band is
+  never empty and never overflows. This keeps text legible on tall pages while staying inside "pages
+  turn, never scroll." *(Line-aware banding is issue #20, refining the original screen-height-slice
+  banding of #06b. Supersedes the original two-page-spread-on-wide default; the open-book spread
+  returns later as an optional "Zoom" reading mode.)*
 - **Turn controls:** ← / → keys, click/tap page edges, on-screen buttons, swipe on touch.
 - **Scroll mode:** available as a hidden toggle only (cheap via PDF.js), never the default, never in the pitch.
 - **Sense of place:** a "two-hands" indicator — left block = pages behind you, right block = pages ahead —
