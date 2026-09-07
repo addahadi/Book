@@ -70,8 +70,36 @@ body {
   z-index: 1;
 }
 
+/*
+ * Live-selection wash. Kept translucent so the real glyphs — painted on the
+ * canvas UNDER this transparent text layer — show through. Alpha mirrors
+ * pdf.js's own text layer (0.25): pdf.js emits a separate, scaleX-corrected
+ * span for each styled run (an italic phrase, a colour/size change), and those
+ * boxes overlap their neighbours by a pixel or two. Two translucent selection
+ * boxes then stack over the seam; at 0.4 that overlap read as a much darker
+ * band flanking the run (~0.64), at 0.25 it's barely perceptible. (The
+ * committed highlight has no such doubling — it's coalesced to one box per line
+ * in marks.ts — so this only ever affected the in-progress selection.)
+ */
 .textLayer ::selection {
-  background: rgba(90, 140, 255, 0.4);
+  background: rgba(90, 140, 255, 0.25);
+}
+.textLayer ::-moz-selection {
+  background: rgba(90, 140, 255, 0.25);
+}
+
+/*
+ * pdf.js appends an absolutely-positioned <br> after each end-of-line run
+ * (pdf.js TextLayer, hasEOL). A multi-line selection crosses those <br> nodes,
+ * and the browser paints a thin selection sliver on each at the line's start —
+ * the stray 1-2px boxes at the page's left edge. Neutralise their selection
+ * background, exactly as pdf.js's own text-layer CSS does.
+ */
+.textLayer br::selection {
+  background: transparent;
+}
+.textLayer br::-moz-selection {
+  background: transparent;
 }
 
 /*
