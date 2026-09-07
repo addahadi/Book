@@ -64,7 +64,10 @@ v1 is validated by the author dogfooding it as a daily reader.
 - **Turn controls:** ← / → keys, click/tap page edges, on-screen buttons, swipe on touch.
 - **Scroll mode:** available as a hidden toggle only (cheap via PDF.js), never the default, never in the pitch.
 - **Sense of place:** a "two-hands" indicator — left block = pages behind you, right block = pages ahead —
-  plus "page N of M · P% in". Not a scroll bar; a *felt* position.
+  plus "page N of M · P% in". A *felt* position for reading, and **grab-to-seek for travel** (issue #21):
+  drag or click it to seek, with a live thumbnail of the page under your finger and a ghost marker for
+  where you'd land, releasing onto a discrete page (your place is kept until you release). Still not a
+  free scroll bar.
 - **Night mode:** real warm dark theme for eye comfort. Not fake paper.
 - **Auto-resume:** each book reopens exactly where you left off (page + position).
 

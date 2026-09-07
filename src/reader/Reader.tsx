@@ -521,19 +521,29 @@ export default function Reader({ bookId }: { bookId: string }) {
   const atStart = currentPage <= 1 && bi === 0;
   const atEnd = numPages > 0 && currentPage >= numPages && bi === bandTops.length - 1;
 
-  // ← / → keys turn pages/bands. Bound once; the store reads live state.
+  // ← / → keys turn pages/bands; PageUp/PageDown jump ±10 pages for coarse
+  // travel (issue #21). Bound once; the store reads live state. The scrubber
+  // slider handles these keys itself and stops propagation, so a focused slider
+  // moves by page without also turning a band here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Don't hijack arrows while typing in a field (e.g. go-to-page).
+      // Don't hijack keys while typing in a field (e.g. go-to-page).
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
         return;
       if (e.key === 'ArrowRight') nextPage();
       else if (e.key === 'ArrowLeft') prevPage();
+      else if (e.key === 'PageDown') {
+        e.preventDefault();
+        goToPage(posRef.current.currentPage + 10);
+      } else if (e.key === 'PageUp') {
+        e.preventDefault();
+        goToPage(posRef.current.currentPage - 10);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [nextPage, prevPage]);
+  }, [nextPage, prevPage, goToPage]);
 
   // Tapping the page does NOT turn it — pages turn via the arrow keys, the
   // header buttons, or a swipe. A tap on the surface only dismisses an open menu,
@@ -754,7 +764,7 @@ export default function Reader({ bookId }: { bookId: string }) {
         />
       )}
       <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">
-        <PositionIndicator />
+        <PositionIndicator doc={doc} />
       </footer>
     </div>
   );
