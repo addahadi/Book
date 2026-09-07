@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { colorName, inkOf } from './marks';
-import { TYPE_LABEL, TypeIcon } from './NotebookPanel';
+import { buildCopyText, useCopyFeedback } from './copy';
+import { CopyIcon, TYPE_LABEL, TypeIcon } from './NotebookPanel';
 import type { Annotation } from '../types';
 
 // The detail view for a single annotation (issue #14): a highlight / note /
@@ -57,6 +58,8 @@ function ReservedSection({ label, hint }: { label: string; hint: string }) {
 
 export default function AnnotationDetail({ annotation, bookTitle, onBack, onGoToSource }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const { copiedKey, copy } = useCopyFeedback();
+  const copied = copiedKey === annotation.id;
 
   const ink = inkOf(annotation);
   const excerpt = excerptOf(annotation);
@@ -185,12 +188,21 @@ export default function AnnotationDetail({ annotation, bookTitle, onBack, onGoTo
         <ReservedSection label="Linked notes" hint="Note-linking arrives in a later version." />
       </div>
 
-      {/* Go to source. */}
-      <div className="border-t border-black/10 p-3 dark:border-white/10">
+      {/* Copy (plain-text excerpt + note + citation) and Go to source. */}
+      <div className="flex items-center gap-2 border-t border-black/10 p-3 dark:border-white/10">
+        <button
+          type="button"
+          onClick={() => copy(annotation.id, buildCopyText(annotation, bookTitle))}
+          aria-label="Copy this mark to the clipboard"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ring-1 ring-black/15 hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/5"
+        >
+          <CopyIcon />
+          {copied ? 'Copied ✓' : 'Copy'}
+        </button>
         <button
           type="button"
           onClick={() => onGoToSource(annotation.page)}
-          className="w-full rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+          className="flex-1 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
         >
           Go to source · page {annotation.page} →
         </button>

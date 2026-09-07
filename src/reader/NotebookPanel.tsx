@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HIGHLIGHT_COLORS, inkOf } from './marks';
+import { buildCopyText, useCopyFeedback } from './copy';
 import AnnotationDetail from './AnnotationDetail';
 import type { Annotation } from '../types';
 
@@ -50,6 +51,23 @@ function entryText(a: Annotation): string {
 
 // A small, crisp type icon in the mark's ink, so entries are distinguishable at
 // a glance without relying on colour alone. Shared with the detail view (#14).
+// The copy affordance, shared by the detail view's Copy button and the revealed
+// row icons: two offset sheets, the classic "copy" glyph.
+export function CopyIcon() {
+  return (
+    <svg width={15} height={15} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function TypeIcon({ type, ink }: { type: Annotation['type']; ink: string }) {
   const common = { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': true } as const;
   switch (type) {
@@ -108,6 +126,8 @@ export default function NotebookPanel({
   // removed elsewhere drops us cleanly back to the list.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
+  // Copy-to-clipboard feedback, keyed by mark id so only the copied row shows ✓.
+  const { copiedKey, copy } = useCopyFeedback();
 
   // Escape steps back: from a detail view to the list, then out of the panel —
   // matching the other floating surfaces.
@@ -238,42 +258,57 @@ export default function NotebookPanel({
                 {g.items.map((a) => {
                   const ink = inkOf(a);
                   const hasSideNote = a.type !== 'note' && !!a.note;
+                  const copied = copiedKey === a.id;
                   return (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setSelectedId(a.id)}
-                      style={{ borderLeftColor: ink }}
-                      className="flex w-full items-start gap-3 border-l-[3px] px-4 py-2.5 text-left hover:bg-black/5 dark:hover:bg-white/5"
-                    >
-                      <span
-                        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded"
-                        style={{ background: `${ink}22` }}
+                    <div key={a.id} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(a.id)}
+                        style={{ borderLeftColor: ink }}
+                        className="flex w-full items-start gap-3 border-l-[3px] py-2.5 pl-4 pr-10 text-left hover:bg-black/5 dark:hover:bg-white/5"
                       >
-                        <TypeIcon type={a.type} ink={ink} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                          {TYPE_LABEL[a.type]}
-                          {hasSideNote && <span title="Has a margin note">✎</span>}
-                        </span>
                         <span
-                          className={`mt-0.5 block break-words text-sm ${
-                            a.type === 'highlight' || a.type === 'underline' || a.type === 'strike'
-                              ? 'italic'
-                              : ''
-                          }`}
-                          style={{
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
+                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded"
+                          style={{ background: `${ink}22` }}
                         >
-                          {entryText(a)}
+                          <TypeIcon type={a.type} ink={ink} />
                         </span>
-                      </span>
-                    </button>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                            {TYPE_LABEL[a.type]}
+                            {hasSideNote && <span title="Has a margin note">✎</span>}
+                          </span>
+                          <span
+                            className={`mt-0.5 block break-words text-sm ${
+                              a.type === 'highlight' || a.type === 'underline' || a.type === 'strike'
+                                ? 'italic'
+                                : ''
+                            }`}
+                            style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {entryText(a)}
+                          </span>
+                        </span>
+                      </button>
+                      {/* Copy stays out of the way — revealed on hover/focus so the
+                          dense list keeps scanning cleanly (grill decision). */}
+                      <button
+                        type="button"
+                        onClick={() => copy(a.id, buildCopyText(a, bookTitle))}
+                        aria-label="Copy mark to clipboard"
+                        title="Copy"
+                        className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded text-neutral-500 ring-1 ring-black/10 transition hover:bg-black/5 focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 dark:text-neutral-400 dark:ring-white/10 dark:hover:bg-white/5 ${
+                          copied ? 'opacity-100' : 'opacity-0'
+                        }`}
+                      >
+                        {copied ? <span className="text-xs">✓</span> : <CopyIcon />}
+                      </button>
+                    </div>
                   );
                 })}
               </section>
