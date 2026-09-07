@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useReader } from '../store/reader';
 import type { PdfDocument } from './pdf';
 import { useThumbnail } from './thumbnails';
+import { setScrubbing } from './prefetch';
 
 // The seek preview's frame width (CSS px). The image sets its own height once
 // loaded; the placeholder holds a page-ish aspect so the popover doesn't jump.
@@ -37,12 +38,16 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         draggingRef.current = false;
+        setScrubbing(false);
         setScrubPage(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [scrubPage]);
+
+  // Never leave prefetch paused if we unmount mid-seek.
+  useEffect(() => () => setScrubbing(false), []);
 
   // Nothing to show until a document has loaded.
   if (!numPages) return null;
@@ -70,6 +75,7 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     draggingRef.current = true;
+    setScrubbing(true); // pause page prefetch so the preview never stalls (#22)
     setScrubPage(pageAtX(e.clientX));
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -79,6 +85,7 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
+    setScrubbing(false);
     const target = pageAtX(e.clientX);
     setScrubPage(null);
     goToPage(target); // land at the top of the target page

@@ -4,20 +4,12 @@ import type { Annotation, RegionRect, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
 import { markRectStyle, type MarkRect } from './marks';
 import { ensureTextLayerRegistered, unregisterTextLayer } from './textSelection';
+import type { PageCache } from './prefetch';
 
 // A drag shorter than this (px, either axis) counts as a click, not a region
 // box — so a plain tap on a scanned page can select an existing box to remove
 // rather than dropping a zero-area rectangle.
 const REGION_MIN_DRAG = 6;
-
-// Minimum device-pixels per CSS pixel to render the page backing store at. We
-// oversample past `devicePixelRatio` — Chrome's own PDF viewer supersamples,
-// which is why it can look sharper than a plain 1:1 render on a non-HiDPI
-// screen. Downscaling the extra detail via CSS gives crisper glyph edges.
-const MIN_RENDER_SCALE = 2;
-// Browser <canvas> area ceiling (~16.7M px in Chrome/Safari). Clamp the backing
-// store below it so a tall page's oversampled canvas is never silently dropped.
-const MAX_CANVAS_AREA = 16_777_216;
 
 // A user selection resolved to an anchor plus its on-screen rect (for the menu).
 export type Selection = { anchor: TextAnchor; rect: DOMRect };
@@ -62,6 +54,9 @@ type Props = {
   page: number;
   /** CSS width (px) to render the page at — the page is fit to this width. */
   width: number;
+  /** Shared page-raster cache (issue #22): the visible canvas is blitted from a
+      (usually prefetched) offscreen render, so a page turn never flashes blank. */
+  cache: PageCache;
   /** Marks anchored to this page, re-rendered over the text (issue #09). */
   annotations: Annotation[];
   /** Scanned-PDF fallback (issue #12): no text layer, so text selection is off
@@ -105,6 +100,7 @@ export default function PdfPage({
   doc,
   page,
   width,
+  cache,
   annotations,
   regionMode = false,
   onMeasure,
@@ -135,40 +131,26 @@ export default function PdfPage({
     setIndex(null);
 
     (async () => {
-      const pdfPage = await doc.getPage(page);
+      // Rasterize (or reuse) the page offscreen via the shared cache (#22), then
+      // blit it into the visible canvas. The blit is synchronous — we set the
+      // canvas size and drawImage in the same tick — so the visible canvas never
+      // paints a blank frame mid-turn: it shows the old page until the new raster
+      // is ready, then swaps instantly (immediately, when the page was
+      // prefetched). The backing store carries the oversampled detail; CSS size
+      // is the fitted size, so the page is never upscaled.
+      const rendered = await cache.render(page, width);
       if (cancelled) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      // Opaque backing store: pdf.js fills the page white before drawing, so
-      // there's no transparency to preserve, and glyphs antialias against solid
-      // white instead of a transparent buffer — visibly crisper text.
       const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) return;
-
-      // Fit the page to the requested width; height follows the aspect ratio.
-      const base = pdfPage.getViewport({ scale: 1 });
-      const scale = width / base.width;
-      const heightCss = base.height * scale;
-      const dpr = window.devicePixelRatio || 1;
-
-      // Render the backing store above CSS resolution for crisp text: at least
-      // MIN_RENDER_SCALE device-pixels per CSS pixel (supersampling, like
-      // Chrome's viewer), never below the real dpr, and clamped so the canvas
-      // area stays under the browser ceiling for a tall page.
-      const maxScale = Math.sqrt(MAX_CANVAS_AREA / Math.max(1, width * heightCss));
-      const renderScale = Math.min(Math.max(dpr, MIN_RENDER_SCALE), maxScale);
-
-      // CSS size is the fitted size, so the page is never upscaled or stretched;
-      // only the backing store carries the extra detail.
-      const viewport = pdfPage.getViewport({ scale: scale * renderScale });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
+      const { canvas: src, heightCss } = rendered;
+      canvas.width = src.width;
+      canvas.height = src.height;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${heightCss}px`;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-      if (cancelled) return;
+      ctx.drawImage(src, 0, 0);
       setSize({ w: width, h: heightCss });
 
       // Scanned page (no text layer): skip the selectable text layer entirely —
@@ -179,6 +161,11 @@ export default function PdfPage({
         setIndex(null);
         return;
       }
+
+      // pdf.js caches getPage, so this is effectively free after the raster.
+      const pdfPage = await doc.getPage(page);
+      if (cancelled) return;
+      const scale = width / pdfPage.getViewport({ scale: 1 }).width;
 
       // Text layer, laid out in CSS pixels over the canvas (CSS-scale viewport,
       // NOT the dpr-scaled one). Render into a DETACHED element and swap it into
@@ -219,7 +206,7 @@ export default function PdfPage({
       cancelled = true;
       textLayer?.cancel();
     };
-  }, [doc, page, width, onMeasure, regionMode]);
+  }, [doc, page, width, cache, onMeasure, regionMode]);
 
   // Detach this page's text layer from the global selection-smoothing registry
   // on unmount (the render effect re-registers on every re-render).

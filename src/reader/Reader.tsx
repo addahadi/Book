@@ -6,6 +6,7 @@ import NoteEditor from './NoteEditor';
 import BookmarkControls from './BookmarkControls';
 import NotebookPanel from './NotebookPanel';
 import { usePdfDocument } from './usePdfDocument';
+import { usePageCache } from './prefetch';
 import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
   addAnnotation,
@@ -424,6 +425,11 @@ export default function Reader({ bookId }: { bookId: string }) {
   const { doc, error: renderError } = usePdfDocument(data);
   const error = loadError ?? renderError;
 
+  // Shared page-raster cache (issue #22): PdfPage blits the visible canvas from
+  // it, and we warm the neighbours below so a page turn is instant and never
+  // flashes blank.
+  const cache = usePageCache(doc);
+
   // Publish the loaded document's page count to the store.
   useEffect(() => {
     if (doc) setNumPages(doc.numPages);
@@ -520,6 +526,21 @@ export default function Reader({ bookId }: { bookId: string }) {
   const bi = bandIndexOf(bandTops, pageOffset);
   const atStart = currentPage <= 1 && bi === 0;
   const atEnd = numPages > 0 && currentPage >= numPages && bi === bandTops.length - 1;
+
+  // Warm the neighbour a turn is about to reveal (issue #22), so the page swap
+  // is instant. Prioritized by band position — the next page once you reach the
+  // last band, the previous once you're at the first — and deferred a beat so it
+  // never competes with the current page's own render.
+  useEffect(() => {
+    if (!doc || width <= 0) return;
+    const atLastBand = bi >= bandTops.length - 1;
+    const atFirstBand = bi <= 0;
+    const t = window.setTimeout(() => {
+      if (atLastBand && currentPage < numPages) cache.prefetch(currentPage + 1, width);
+      if (atFirstBand && currentPage > 1) cache.prefetch(currentPage - 1, width);
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [doc, width, currentPage, bi, bandTops.length, numPages, cache]);
 
   // ← / → keys turn pages/bands; PageUp/PageDown jump ±10 pages for coarse
   // travel (issue #21). Bound once; the store reads live state. The scrubber
@@ -703,6 +724,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 doc={doc}
                 page={currentPage}
                 width={width}
+                cache={cache}
                 annotations={pageAnnotations}
                 regionMode={!hasTextLayer}
                 onMeasure={onMeasure}
