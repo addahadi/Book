@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextLayer, type PdfDocument, type TextLayerInstance } from './pdf';
 import type { Annotation, RegionRect, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
-import { markRectStyle, type MarkRect } from './marks';
+import { coalesceLineRects, markRectStyle, type MarkRect } from './marks';
 import { ensureTextLayerRegistered, unregisterTextLayer } from './textSelection';
 import type { PageCache } from './prefetch';
 
@@ -227,14 +227,20 @@ export default function PdfPage({
       if (a.anchor?.kind !== 'text') continue; // bookmarks/region marks aren't text runs
       const range = anchorToRange(index, a.anchor);
       if (!range) continue;
-      const rects = [...range.getClientRects()]
-        .filter((r) => r.width > 0 && r.height > 0)
-        .map((r) => ({
-          left: r.left - origin.left,
-          top: r.top - origin.top,
-          width: r.width,
-          height: r.height,
-        }));
+      // Raw client rects come back one-per-text-item and double up on styled
+      // lines; coalesce them to one box per line so the wash never self-stacks
+      // (see coalesceLineRects). The width/height filter also drops the browser's
+      // zero-area left-edge boundary rects before they'd paint.
+      const rects = coalesceLineRects(
+        [...range.getClientRects()]
+          .filter((r) => r.width > 0 && r.height > 0)
+          .map((r) => ({
+            left: r.left - origin.left,
+            top: r.top - origin.top,
+            width: r.width,
+            height: r.height,
+          })),
+      );
       if (rects.length)
         out.push({ id: a.id, type: a.type, color: a.color, note: a.note, rects });
     }

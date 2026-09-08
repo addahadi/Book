@@ -41,6 +41,41 @@ export function colorName(value?: string): string {
 // A single line-rect of a mark, positioned relative to the page wrapper.
 export type MarkRect = { left: number; top: number; width: number; height: number };
 
+// Collapse a range's raw client rects into one rect per visual line.
+//
+// `Range.getClientRects()` over the pdf.js text layer returns a rect PER text
+// item the range crosses, and a styled line (italic runs, a coloured link,
+// mixed font sizes) yields several overlapping bands for the same line — e.g. a
+// full-width box at H=24 and a near-identical one 2px lower at H=21. Painting
+// each as its own translucent div double-stacks the wash (0.4 over 0.4 ≈ 0.64),
+// so styled lines read darker than clean ones. Unioning every rect that shares a
+// line into a single box paints each line exactly once — a uniform highlight,
+// fewer DOM nodes, and cleaner hit-testing. Zero-area rects (the synthetic
+// left-edge line-boundary boxes the browser emits) are dropped by the caller's
+// width/height filter before this runs.
+export function coalesceLineRects(rects: MarkRect[]): MarkRect[] {
+  if (rects.length <= 1) return rects.map((r) => ({ ...r }));
+  const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left);
+  const lines: MarkRect[] = [];
+  for (const r of sorted) {
+    const line = lines[lines.length - 1];
+    // Same visual line when this rect vertically overlaps the current line band.
+    if (line && r.top < line.top + line.height && r.top + r.height > line.top) {
+      const left = Math.min(line.left, r.left);
+      const top = Math.min(line.top, r.top);
+      const right = Math.max(line.left + line.width, r.left + r.width);
+      const bottom = Math.max(line.top + line.height, r.top + r.height);
+      line.left = left;
+      line.top = top;
+      line.width = right - left;
+      line.height = bottom - top;
+    } else {
+      lines.push({ ...r });
+    }
+  }
+  return lines;
+}
+
 // The CSS for one rect of a mark, by type. Highlights wash the whole rect;
 // underline/strike are thin lines pinned to the bottom / middle of the rect.
 export function markRectStyle(
