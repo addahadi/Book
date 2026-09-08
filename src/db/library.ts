@@ -135,6 +135,76 @@ export async function reconcileTextLayer(
   return has;
 }
 
+// The horizontal extent of a book's text column, as page-width fractions in
+// [0, 1] — the left/right edges of the text once blank side margins are
+// discounted. The reader crops to this on a narrow screen so screen width is
+// spent on text, not whitespace (which also keeps text legible enough that
+// banding re-engages). `null` when there's nothing worth cropping.
+export type TextColumn = { leftFrac: number; rightFrac: number };
+
+// How many early pages to sample when estimating the text column. A doc-wide
+// estimate (not per-page) keeps every page rendering at one stable width, so the
+// page-raster cache keys stay consistent.
+const COLUMN_SAMPLE_PAGES = 8;
+
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+  return sorted[i];
+}
+
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+
+/**
+ * Estimate a book's text-column extent (page-width fractions) by sampling the
+ * text-item geometry of its first few pages — no rasterizing needed, so the
+ * reader can know the crop width before a page renders. Per page we take the
+ * 5th/95th percentiles of item left/right edges (percentiles reject a stray
+ * margin page number or running head), then the median across sampled pages for
+ * a stable doc-wide column. Returns null for a scanned/empty book or if the
+ * geometry is unusable; the caller still guards against a near-full-width column.
+ */
+export async function estimateTextColumn(doc: PdfDocument): Promise<TextColumn | null> {
+  const n = Math.min(doc.numPages, COLUMN_SAMPLE_PAGES);
+  const lefts: number[] = [];
+  const rights: number[] = [];
+  for (let p = 1; p <= n; p++) {
+    try {
+      const page = await doc.getPage(p);
+      const pageWidth = page.getViewport({ scale: 1 }).width;
+      if (!pageWidth) continue;
+      const { items } = await page.getTextContent();
+      const l: number[] = [];
+      const r: number[] = [];
+      for (const it of items) {
+        // Skip marked-content wrappers (no `str`) and whitespace/zero-width runs.
+        if (!('str' in it) || !it.str.trim() || it.width <= 0) continue;
+        const x = it.transform[4]; // left edge of the run, in unscaled user space
+        l.push(x / pageWidth);
+        r.push((x + it.width) / pageWidth);
+      }
+      if (l.length < 4) continue; // too little text on this page to trust
+      l.sort((a, b) => a - b);
+      r.sort((a, b) => a - b);
+      lefts.push(percentile(l, 0.05));
+      rights.push(percentile(r, 0.95));
+    } catch {
+      // Unreadable page — skip it.
+    }
+  }
+  if (!lefts.length) return null;
+  const leftFrac = clamp01(median(lefts));
+  const rightFrac = clamp01(median(rights));
+  if (rightFrac <= leftFrac) return null;
+  return { leftFrac, rightFrac };
+}
+
 /**
  * Ingest a picked/dropped file into the library. Returns the book id — the
  * existing one if these exact bytes are already shelved (dedupe by hash).
