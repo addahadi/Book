@@ -741,6 +741,11 @@ export default function Reader({ bookId }: { bookId: string }) {
       ref={rootRef}
       className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100"
     >
+      {/* Hidden bars are unmounted (not just faded) so `main` reclaims their
+          height — a full-bleed reading surface. Only the manual hide collapses
+          the layout; the idle auto-fade stays opacity-only so the page never
+          shifts under you while you're reading. */}
+      {!chromeHidden && (
       <header
         onPointerEnter={() => setChromeHover(true)}
         onPointerLeave={() => setChromeHover(false)}
@@ -917,6 +922,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           </div>
         </div>
       </header>
+      )}
       {!hasTextLayer && !noticeDismissed && (
         <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-400/20 dark:bg-amber-950/40 dark:text-amber-200">
           <span aria-hidden>⚠</span>
@@ -1061,6 +1067,7 @@ export default function Reader({ bookId }: { bookId: string }) {
           onClose={() => setNotebookOpen(false)}
         />
       )}
+      {!chromeHidden && (
       <footer
         onPointerEnter={() => setChromeHover(true)}
         onPointerLeave={() => setChromeHover(false)}
@@ -1070,6 +1077,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       >
         <PositionIndicator doc={doc} />
       </footer>
+      )}
     </div>
   );
 }
