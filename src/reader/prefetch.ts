@@ -24,6 +24,10 @@ export type RenderedPage = { canvas: HTMLCanvasElement; heightCss: number; width
 export type PageCache = {
   // Render for display: from cache if warm, otherwise a fresh full raster.
   render: (page: number, width: number) => Promise<RenderedPage>;
+  // Synchronous cache lookup: the warm raster for a page, or null if it isn't
+  // resident. Lets the display blit a prefetched page during commit (before the
+  // browser paints), so a page-boundary turn doesn't flash the old page.
+  peek: (page: number, width: number) => RenderedPage | null;
   // Speculatively warm a neighbour — best-effort, skipped while scrubbing, and
   // parse-only for very tall pages. Never returns anything.
   prefetch: (page: number, width: number) => void;
@@ -119,6 +123,10 @@ export function usePageCache(doc: PdfDocument | null): PageCache {
           });
         renderInflight.set(k, p);
         return p;
+      },
+      peek(page, width) {
+        if (!doc) return null;
+        return entries.get(key(page, width)) ?? null;
       },
       prefetch(page, width) {
         if (!doc || scrubbing || page < 1 || width <= 0) return;

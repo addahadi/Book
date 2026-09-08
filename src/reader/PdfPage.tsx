@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TextLayer, type PdfDocument, type TextLayerInstance } from './pdf';
 import type { Annotation, RegionRect, TextAnchor } from '../types';
 import { anchorToRange, buildTextIndex, rangeToAnchor, type PageTextIndex } from './anchor';
@@ -134,6 +134,30 @@ export default function PdfPage({
   // in-flight gesture's origin + whether it has moved far enough to be a draw.
   const [draft, setDraft] = useState<MarkRect | null>(null);
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  // Pre-paint blit for flash-free page turns (issue #22 follow-up). When the new
+  // page's raster is already warm (prefetched), draw it into the visible canvas
+  // *synchronously during commit* — before the browser paints this turn — so
+  // crossing a page boundary never shows a frame of the old page snapped to the
+  // new offset. The async effect below still owns the text layer and the
+  // cold-cache path; on a cold turn `peek` returns null and this is a no-op.
+  useLayoutEffect(() => {
+    if (!doc || width <= 0) return;
+    const rendered = cache.peek(page, width);
+    if (!rendered) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+    const { canvas: src, heightCss } = rendered;
+    if (canvas.width !== src.width) canvas.width = src.width;
+    if (canvas.height !== src.height) canvas.height = src.height;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${heightCss}px`;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(src, 0, 0);
+    setSize((s) => (s.w === width && s.h === heightCss ? s : { w: width, h: heightCss }));
+  }, [doc, page, width, cache]);
 
   useEffect(() => {
     if (!doc || width <= 0) return;
