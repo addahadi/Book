@@ -139,7 +139,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   // effect so we never write the pre-restore default back over the saved spot.
   const [resumed, setResumed] = useState(false);
   const clipRef = useRef<HTMLDivElement>(null);
-  const touchStartX = useRef<number | null>(null);
+  // Start of an in-flight one-finger touch: position + time, so touchend can tell
+  // a page-turn swipe from a text-selection drag, a vertical drag, or a slow
+  // long-press. Null while no single-finger gesture is tracked (e.g. multitouch).
+  const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
   // Latest position + resume flag, mirrored into refs so the leave-book flush
   // can read them without re-subscribing on every turn.
   const posRef = useRef({ currentPage, pageOffset, resumed });
@@ -721,16 +724,33 @@ export default function Reader({ bookId }: { bookId: string }) {
     }
   };
 
-  // Swipe left/right on touch devices.
+  // Swipe left/right on touch devices. Disambiguated from the other one-finger
+  // gestures that share this surface: a text-selection drag (which must be left
+  // to the mark menu, not eaten as a turn), a vertical drag, and a slow
+  // long-press. A two-finger touch is never a swipe (reserved for pinch-zoom).
   const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0]?.clientX ?? null;
+    if (e.touches.length >= 2) {
+      touchStart.current = null; // multitouch — not a swipe candidate
+      return;
+    }
+    const t = e.touches[0];
+    touchStart.current = t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
   };
   const onTouchEnd = (e: React.TouchEvent) => {
-    const start = touchStartX.current;
-    touchStartX.current = null;
-    if (start === null) return;
-    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-    if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    // A completed selection isn't a swipe — leave the text under the mark menu.
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
+    const end = e.changedTouches[0];
+    if (!end) return;
+    const dx = end.clientX - start.x;
+    const dy = end.clientY - start.y;
+    // Must be far enough, predominantly horizontal, and quick — so a vertical
+    // drag or a slow long-press-and-drag (selection) never turns the page.
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+    if (Date.now() - start.t > 800) return;
     // Swipe right-to-left (dx < 0) advances, like turning a page forward.
     if (dx < 0) nextPage();
     else prevPage();
