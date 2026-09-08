@@ -35,6 +35,12 @@ type NoteTarget =
 
 // Distance (px) a touch must travel horizontally to count as a page-turn swipe.
 const SWIPE_THRESHOLD = 50;
+// Farthest a pointer may move and still count as a tap (not a drag), for
+// edge-tap page turns.
+const TAP_MOVE = 10;
+// Width of the left / right edge-tap zones, as a fraction of the surface — a tap
+// here turns the page (SPEC §6.1: "click/tap page edges"). The middle is inert.
+const EDGE_ZONE = 0.22;
 // Widest a single page column is drawn, even on large screens, so text keeps a
 // comfortable measure instead of ballooning; the page centres in extra space.
 const MAX_PAGE_WIDTH = 1000;
@@ -143,6 +149,11 @@ export default function Reader({ bookId }: { bookId: string }) {
   // a page-turn swipe from a text-selection drag, a vertical drag, or a slow
   // long-press. Null while no single-finger gesture is tracked (e.g. multitouch).
   const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
+  // Pointer-down position on the reading surface, to measure tap-vs-drag for
+  // edge-tap turns. And a per-gesture latch set when a mark/selection tap opened
+  // its own menu this cycle, so the same tap doesn't also turn the page.
+  const surfaceDown = useRef<{ x: number; y: number } | null>(null);
+  const actedRef = useRef(false);
   // Latest position + resume flag, mirrored into refs so the leave-book flush
   // can read them without re-subscribing on every turn.
   const posRef = useRef({ currentPage, pageOffset, resumed });
@@ -234,12 +245,14 @@ export default function Reader({ bookId }: { bookId: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const onSelect = useCallback((selection: Selection | null) => {
+    if (selection) actedRef.current = true; // a real selection — not an edge tap
     setPendingRemove(null);
     setEditingNote(null);
     setPendingSel(selection);
   }, []);
 
   const onMarkClick = useCallback((id: string, rect: DOMRect) => {
+    actedRef.current = true; // opened the remove menu — don't also turn the page
     setPendingSel(null);
     setEditingNote(null);
     setPendingRemove({ id, rect });
@@ -247,6 +260,7 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   // A margin note flag (or an existing mark's "Note") was tapped → edit it.
   const onNoteClick = useCallback((id: string, rect: DOMRect) => {
+    actedRef.current = true;
     setPendingSel(null);
     setPendingRemove(null);
     setEditingNote({ mode: 'existing', id, rect });
@@ -710,18 +724,41 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [nextPage, prevPage, goToPage]);
 
-  // Tapping the page does NOT turn it — pages turn via the arrow keys, the
-  // header buttons, or a swipe. A tap on the surface only dismisses an open menu,
-  // but never when a selection just completed (that pointer-up is what opens the
-  // selection menu — a click-away collapses the selection first, so it dismisses).
-  const onSurfacePointerUp = () => {
+  // Remember where a surface press began (tap-vs-drag) and clear the per-gesture
+  // "already acted" latch. A mark/note tap that runs before this pointerup (the
+  // text layer's own handler) sets the latch to suppress the edge-tap turn.
+  const onSurfacePointerDown = (e: React.PointerEvent) => {
+    surfaceDown.current = { x: e.clientX, y: e.clientY };
+    actedRef.current = false;
+  };
+
+  // A tap on the page turns it only at the left / right edges (SPEC §6.1); a tap
+  // elsewhere just dismisses an open menu. Never acts when a selection just
+  // completed (that pointerup opens the mark menu) or when a mark tap already
+  // opened its own menu this cycle.
+  const onSurfacePointerUp = (e: React.PointerEvent) => {
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
+    const down = surfaceDown.current;
+    surfaceDown.current = null;
+
+    // An open menu: a tap anywhere dismisses it (and does nothing else).
     if (pendingSel || pendingRemove || editingNote) {
       setPendingSel(null);
       setPendingRemove(null);
       setEditingNote(null); // unmount → auto-saves the open note
+      return;
     }
+    if (actedRef.current) return; // a mark/note tap already handled this gesture
+
+    // Edge-tap to turn: a still tap in the left / right margin zone.
+    if (!down) return;
+    if (Math.abs(e.clientX - down.x) > TAP_MOVE || Math.abs(e.clientY - down.y) > TAP_MOVE)
+      return; // moved too far — a drag, not a tap
+    const rect = e.currentTarget.getBoundingClientRect();
+    const frac = rect.width ? (e.clientX - rect.left) / rect.width : 0.5;
+    if (frac <= EDGE_ZONE) prevPage();
+    else if (frac >= 1 - EDGE_ZONE) nextPage();
   };
 
   // Swipe left/right on touch devices. Disambiguated from the other one-finger
@@ -975,6 +1012,7 @@ export default function Reader({ bookId }: { bookId: string }) {
         </button>
       )}
       <main
+        onPointerDown={onSurfacePointerDown}
         onPointerUp={onSurfacePointerUp}
         onContextMenu={(e) => e.preventDefault()}
         onTouchStart={onTouchStart}
