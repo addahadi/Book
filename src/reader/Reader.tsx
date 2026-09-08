@@ -854,18 +854,20 @@ export default function Reader({ bookId }: { bookId: string }) {
       <header
         onPointerEnter={() => setChromeHover(true)}
         onPointerLeave={() => setChromeHover(false)}
-        className={`flex items-center justify-between border-b border-black/10 px-4 py-2 text-sm transition-opacity duration-500 dark:border-white/10 ${
+        className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-b border-black/10 px-3 py-2 text-sm transition-opacity duration-500 dark:border-white/10 sm:px-4 ${
           chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
           <button
             type="button"
             onClick={closeBook}
             aria-label="Back to library"
-            className="rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+            title="Back to library"
+            className="shrink-0 rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
           >
-            ← Library
+            <span aria-hidden>←</span>
+            <span className="hidden sm:inline"> Library</span>
           </button>
           <button
             type="button"
@@ -901,7 +903,7 @@ export default function Reader({ bookId }: { bookId: string }) {
             {title}
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           <button
             type="button"
             onClick={() => setChromeHidden(true)}
@@ -1001,7 +1003,7 @@ export default function Reader({ bookId }: { bookId: string }) {
               </span>
             )}
           </button>
-          <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
+          <span className="hidden tabular-nums text-neutral-500 dark:text-neutral-400 sm:inline">
             page {currentPage}
             {numPages ? ` of ${numPages}` : ''}
           </span>

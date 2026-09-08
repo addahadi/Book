@@ -135,7 +135,7 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
   const scrubPercent = scrubPage != null ? Math.round(((scrubPage - 1) / denom) * 100) : 0;
 
   return (
-    <div className="flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400">
+    <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 sm:gap-4">
       {/* Track wrapper — anchors the ghost marker and the seek preview, which sit
           outside the (clipped) rounded track so they aren't cut off. */}
       <div className="relative flex-1">
@@ -153,7 +153,7 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
           onPointerUp={onPointerUp}
           onKeyDown={onKeyDown}
           style={{ touchAction: 'none' }}
-          className="flex h-2.5 cursor-pointer touch-none overflow-hidden rounded-full bg-neutral-200 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-neutral-700"
+          className="flex h-3.5 cursor-pointer touch-none overflow-hidden rounded-full bg-neutral-200 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:h-2.5 dark:bg-neutral-700"
         >
           {/* read (grows) · here (bright sliver) · ahead (shrinks) */}
           <div style={{ flexGrow: behind }} className="bg-neutral-500 dark:bg-neutral-300" />
@@ -198,11 +198,16 @@ export default function PositionIndicator({ doc }: { doc: PdfDocument | null }) 
       </div>
 
       <span className="whitespace-nowrap tabular-nums">
-        Page {currentPage} of {numPages} · {percent}% in
+        <span className="sm:hidden">
+          {currentPage}/{numPages}
+        </span>
+        <span className="hidden sm:inline">
+          Page {currentPage} of {numPages} · {percent}% in
+        </span>
       </span>
 
       <form onSubmit={onJump} className="flex items-center gap-1">
-        <label htmlFor="goto" className="whitespace-nowrap">
+        <label htmlFor="goto" className="hidden whitespace-nowrap sm:inline">
           Go to
         </label>
         <input
