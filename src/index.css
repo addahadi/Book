@@ -137,6 +137,22 @@ body {
 }
 
 /*
+ * Focus Mode vignette (issue #18) — dims the gutters around the centred page so
+ * the eye settles on the text. Always mounted (so it can fade in/out via the
+ * opacity utility toggled in Reader) and fully click-through, so selecting and
+ * turning still work underneath. The transparent core clears the page column;
+ * the dark ring only ever falls on the margins.
+ */
+.focusVignette {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  transition: opacity 400ms ease;
+  background: radial-gradient(125% 95% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/*
  * Search-match highlight (issue #16) — a transient focus band over a jumped-to
  * result. Sits with the mark layer UNDER the text layer (click-through) so it
  * never blocks selection. A ring + warm wash sets it apart from user highlights,

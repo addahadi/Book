@@ -10,6 +10,7 @@ import SearchPanel from './SearchPanel';
 import { usePdfDocument } from './usePdfDocument';
 import { useOutline } from './useOutline';
 import { useBookSearch } from './search';
+import { useChromeFade } from './useChromeFade';
 import { usePageCache } from './prefetch';
 import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
@@ -219,6 +220,11 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [searchHit, setSearchHit] = useState<{ page: number; anchor: TextAnchor } | null>(null);
   const [hitFrac, setHitFrac] = useState<number | null>(null);
   const hitAppliedRef = useRef(false);
+  // Focus Mode (issue #18): fullscreen, panels collapsed, margins dimmed. And
+  // whether the pointer is resting on the chrome, which pins it visible.
+  const [focusMode, setFocusMode] = useState(false);
+  const [chromeHover, setChromeHover] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const onSelect = useCallback((selection: Selection | null) => {
     setPendingRemove(null);
@@ -489,6 +495,56 @@ export default function Reader({ bookId }: { bookId: string }) {
     if (frac != null) setHitFrac(frac);
   }, []);
 
+  // Auto-fading chrome (issue #18). Pin it visible while any panel/menu is open
+  // or the pointer rests on the toolbars, so it never fades from under a control.
+  const chromeLocked =
+    tocOpen ||
+    searchOpen ||
+    notebookOpen ||
+    chromeHover ||
+    !!pendingSel ||
+    !!pendingRemove ||
+    !!editingNote;
+  const { visible: chromeVisible, poke: pokeChrome } = useChromeFade(chromeLocked);
+
+  // Focus Mode (issue #18): one gesture into fullscreen with panels collapsed and
+  // margins dimmed. Fullscreen may be refused (permissions, an unsupported
+  // context) — dim and collapse regardless, so the mode still means something.
+  const enterFocus = useCallback(() => {
+    setTocOpen(false);
+    setSearchOpen(false);
+    setNotebookOpen(false);
+    rootRef.current?.requestFullscreen?.().catch(() => {});
+    setFocusMode(true);
+  }, []);
+
+  const exitFocus = useCallback(() => {
+    setFocusMode(false);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }, []);
+
+  // Exiting fullscreen by any means (the browser's own Esc, F11) leaves Focus
+  // Mode too, keeping the toggle and the dimmed surface in step with reality.
+  useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement) setFocusMode(false);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Esc exits Focus Mode. A fallback for when fullscreen wasn't granted (there's
+  // no fullscreenchange to catch then); guarded on no open panel so a panel's own
+  // Esc still closes it first.
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !tocOpen && !searchOpen && !notebookOpen) exitFocus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusMode, tocOpen, searchOpen, notebookOpen, exitFocus]);
+
   // Shared page-raster cache (issue #22): PdfPage blits the visible canvas from
   // it, and we warm the neighbours below so a page turn is instant and never
   // flashes blank.
@@ -669,8 +725,17 @@ export default function Reader({ bookId }: { bookId: string }) {
   };
 
   return (
-    <div className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100">
-      <header className="flex items-center justify-between border-b border-black/10 px-4 py-2 text-sm dark:border-white/10">
+    <div
+      ref={rootRef}
+      className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100"
+    >
+      <header
+        onPointerEnter={() => setChromeHover(true)}
+        onPointerLeave={() => setChromeHover(false)}
+        className={`flex items-center justify-between border-b border-black/10 px-4 py-2 text-sm transition-opacity duration-500 dark:border-white/10 ${
+          chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
@@ -715,6 +780,36 @@ export default function Reader({ bookId }: { bookId: string }) {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={focusMode ? exitFocus : enterFocus}
+            aria-pressed={focusMode}
+            aria-label={focusMode ? 'Exit focus mode' : 'Enter focus mode'}
+            title={focusMode ? 'Exit focus mode (Esc)' : 'Focus mode — fullscreen, distraction-free'}
+            className="rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="block">
+              {focusMode ? (
+                <path
+                  d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+          </button>
           <button
             type="button"
             onClick={toggleTheme}
@@ -800,6 +895,21 @@ export default function Reader({ bookId }: { bookId: string }) {
           </button>
         </div>
       )}
+      {/* Subtle nudge to restore faded chrome (issue #18). Any interaction also
+          brings it back; this just tells you the toolbar is a gesture away. */}
+      {!chromeVisible && (
+        <button
+          type="button"
+          onClick={pokeChrome}
+          onPointerEnter={pokeChrome}
+          aria-label="Show toolbar"
+          className="fixed left-1/2 top-1.5 z-30 flex -translate-x-1/2 items-center justify-center rounded-full px-3 py-0.5 text-neutral-500 opacity-30 transition-opacity hover:opacity-90 dark:text-neutral-400"
+        >
+          <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden className="block">
+            <path d="M2 3l7 4 7-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
       <main
         onPointerUp={onSurfacePointerUp}
         onContextMenu={(e) => e.preventDefault()}
@@ -841,6 +951,10 @@ export default function Reader({ bookId }: { bookId: string }) {
             </div>
           </div>
         )}
+        {/* Focus Mode margin dimming (issue #18): a vignette that darkens the
+            gutters around the centred page while leaving the page itself clear.
+            Click-through, so selection and turning still work underneath. */}
+        <div className={`focusVignette ${focusMode ? 'opacity-100' : 'opacity-0'}`} aria-hidden />
       </main>
       {pendingSel && (
         <SelectionMenu
@@ -909,7 +1023,13 @@ export default function Reader({ bookId }: { bookId: string }) {
           onClose={() => setNotebookOpen(false)}
         />
       )}
-      <footer className="border-t border-black/10 px-4 py-2 dark:border-white/10">
+      <footer
+        onPointerEnter={() => setChromeHover(true)}
+        onPointerLeave={() => setChromeHover(false)}
+        className={`border-t border-black/10 px-4 py-2 transition-opacity duration-500 dark:border-white/10 ${
+          chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
         <PositionIndicator doc={doc} />
       </footer>
     </div>
