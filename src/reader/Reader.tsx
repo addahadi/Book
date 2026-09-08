@@ -5,7 +5,9 @@ import SelectionMenu from './SelectionMenu';
 import NoteEditor from './NoteEditor';
 import BookmarkControls from './BookmarkControls';
 import NotebookPanel from './NotebookPanel';
+import TocPanel from './TocPanel';
 import { usePdfDocument } from './usePdfDocument';
+import { useOutline } from './useOutline';
 import { usePageCache } from './prefetch';
 import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
@@ -203,6 +205,8 @@ export default function Reader({ bookId }: { bookId: string }) {
   // Whether the Notebook panel (issue #13) — the book-wide list of every mark —
   // is open.
   const [notebookOpen, setNotebookOpen] = useState(false);
+  // Whether the Contents panel (issue #15) — the PDF's embedded outline — is open.
+  const [tocOpen, setTocOpen] = useState(false);
 
   const onSelect = useCallback((selection: Selection | null) => {
     setPendingRemove(null);
@@ -425,6 +429,9 @@ export default function Reader({ bookId }: { bookId: string }) {
   const { doc, error: renderError } = usePdfDocument(data);
   const error = loadError ?? renderError;
 
+  // The PDF's embedded table of contents (issue #15), resolved once per document.
+  const outline = useOutline(doc);
+
   // Shared page-raster cache (issue #22): PdfPage blits the visible canvas from
   // it, and we warm the neighbours below so a page turn is instant and never
   // flashes blank.
@@ -607,6 +614,23 @@ export default function Reader({ bookId }: { bookId: string }) {
           >
             ← Library
           </button>
+          <button
+            type="button"
+            onClick={() => setTocOpen((o) => !o)}
+            aria-pressed={tocOpen}
+            aria-label="Contents"
+            title="Contents — the book's table of contents"
+            className="shrink-0 rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="block">
+              <path
+                d="M2 3h3M2 8h3M2 13h3M7 3h7M7 8h7M7 13h7"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
           <span className="truncate font-semibold" title={title}>
             {title}
           </span>
@@ -771,6 +795,17 @@ export default function Reader({ bookId }: { bookId: string }) {
           onCommit={(body) => commitNote(editingNote, body)}
           onDelete={() => deleteNote(editingNote)}
           onClose={() => setEditingNote(null)}
+        />
+      )}
+      {tocOpen && (
+        <TocPanel
+          outline={outline}
+          currentPage={currentPage}
+          onJump={(page) => {
+            goToPage(page);
+            setTocOpen(false);
+          }}
+          onClose={() => setTocOpen(false)}
         />
       )}
       {notebookOpen && (
