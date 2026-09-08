@@ -6,8 +6,10 @@ import NoteEditor from './NoteEditor';
 import BookmarkControls from './BookmarkControls';
 import NotebookPanel from './NotebookPanel';
 import TocPanel from './TocPanel';
+import SearchPanel from './SearchPanel';
 import { usePdfDocument } from './usePdfDocument';
 import { useOutline } from './useOutline';
+import { useBookSearch } from './search';
 import { usePageCache } from './prefetch';
 import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
 import {
@@ -113,6 +115,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     bandTops,
     setNumPages,
     setBandTops,
+    setPageOffset,
     nextPage,
     prevPage,
     goToPage,
@@ -207,6 +210,15 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [notebookOpen, setNotebookOpen] = useState(false);
   // Whether the Contents panel (issue #15) — the PDF's embedded outline — is open.
   const [tocOpen, setTocOpen] = useState(false);
+  // Whether the full-text Search panel (issue #16) is open.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // A jumped-to search match: the page it's on and the run to flash-highlight
+  // there. Cleared once you turn away from that page. `hitFrac` carries the
+  // match's vertical position (page-height fraction) once the page resolves it,
+  // so we can land on the band that holds it.
+  const [searchHit, setSearchHit] = useState<{ page: number; anchor: TextAnchor } | null>(null);
+  const [hitFrac, setHitFrac] = useState<number | null>(null);
+  const hitAppliedRef = useRef(false);
 
   const onSelect = useCallback((selection: Selection | null) => {
     setPendingRemove(null);
@@ -392,6 +404,27 @@ export default function Reader({ bookId }: { bookId: string }) {
     setEditingNote(null);
   }, [currentPage, pageOffset]);
 
+  // Land on the band holding a jumped-to search match (issue #16) once the page's
+  // bands are measured. Runs when the match's vertical fraction arrives or the
+  // band layout updates; a latch applies it once so ordinary turning afterward is
+  // never fought. `hitFrac` is only ever set after the target page's bands exist,
+  // so this can't prematurely snap to a stale single-band layout.
+  useEffect(() => {
+    if (hitFrac == null || hitAppliedRef.current) return;
+    setPageOffset(bandTops[bandIndexOf(bandTops, hitFrac)] ?? 0);
+    hitAppliedRef.current = true;
+  }, [hitFrac, bandTops, setPageOffset]);
+
+  // Clear the flash-highlight once you leave its page (turning within the page
+  // keeps it). Guarded on the page so the band-landing offset change doesn't drop
+  // it.
+  useEffect(() => {
+    if (searchHit && currentPage !== searchHit.page) {
+      setSearchHit(null);
+      setHitFrac(null);
+    }
+  }, [currentPage, searchHit]);
+
   // Load this book's bytes and restore its saved position (issue #07) so every
   // book reopens exactly where you left off; a never-opened book resumes at
   // page 1 / offset 0. Falls back to the shelf if the book was removed out from
@@ -431,6 +464,30 @@ export default function Reader({ bookId }: { bookId: string }) {
 
   // The PDF's embedded table of contents (issue #15), resolved once per document.
   const outline = useOutline(doc);
+
+  // Whole-book full-text search (issue #16), indexed progressively per document.
+  const bookSearch = useBookSearch(doc);
+
+  // Jump to a search result: reveal its page, remember the run to flash-highlight,
+  // and reset the band-landing latch so the new hit's band is applied once known.
+  const jumpToSearchResult = useCallback(
+    (page: number, anchor: TextAnchor) => {
+      setSearchOpen(false);
+      setSearchHit({ page, anchor });
+      setHitFrac(null);
+      hitAppliedRef.current = false;
+      // Only reset the page position when actually changing pages — re-navigating
+      // to the current page would needlessly drop its measured bands.
+      if (page !== posRef.current.currentPage) goToPage(page);
+    },
+    [goToPage],
+  );
+
+  // The page reports where the match sits vertically once it has rendered and
+  // resolved the run; stash it for the band-landing effect below.
+  const onSearchHit = useCallback((frac: number | null) => {
+    if (frac != null) setHitFrac(frac);
+  }, []);
 
   // Shared page-raster cache (issue #22): PdfPage blits the visible canvas from
   // it, and we warm the neighbours below so a page turn is instant and never
@@ -555,6 +612,15 @@ export default function Reader({ bookId }: { bookId: string }) {
   // moves by page without also turning a band here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ctrl/⌘+F opens full-text search (issue #16). Native find can't reach the
+      // book — only the current page's text layer is in the DOM — so take the key.
+      // Handled before the typing guard so it works from anywhere, including the
+      // search box itself.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
       // Don't hijack keys while typing in a field (e.g. go-to-page).
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
@@ -629,6 +695,19 @@ export default function Reader({ bookId }: { bookId: string }) {
                 strokeWidth="1.4"
                 strokeLinecap="round"
               />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSearchOpen((o) => !o)}
+            aria-pressed={searchOpen}
+            aria-label="Search"
+            title="Search this book (Ctrl/⌘+F)"
+            className="shrink-0 rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="block">
+              <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+              <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
           </button>
           <span className="truncate font-semibold" title={title}>
@@ -751,6 +830,8 @@ export default function Reader({ bookId }: { bookId: string }) {
                 cache={cache}
                 annotations={pageAnnotations}
                 regionMode={!hasTextLayer}
+                searchHit={searchHit && searchHit.page === currentPage ? searchHit.anchor : null}
+                onSearchHit={onSearchHit}
                 onMeasure={onMeasure}
                 onSelect={onSelect}
                 onMarkClick={onMarkClick}
@@ -806,6 +887,14 @@ export default function Reader({ bookId }: { bookId: string }) {
             setTocOpen(false);
           }}
           onClose={() => setTocOpen(false)}
+        />
+      )}
+      {searchOpen && (
+        <SearchPanel
+          book={bookSearch}
+          currentPage={currentPage}
+          onJump={jumpToSearchResult}
+          onClose={() => setSearchOpen(false)}
         />
       )}
       {notebookOpen && (

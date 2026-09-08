@@ -74,6 +74,12 @@ type Props = {
   onNoteClick?: (id: string, rect: DOMRect) => void;
   /** Fired when a region box is drawn (region mode), as a normalized 0..1 rect. */
   onRegionDraw?: (rect: RegionRect) => void;
+  /** A search match to flash-highlight on this page (issue #16), or null. Painted
+      as a transient focus band distinct from user marks. */
+  searchHit?: TextAnchor | null;
+  /** Reports the search hit's top as a page-height fraction once resolved (or
+      null if it can't be), so the parent can land on the band that holds it. */
+  onSearchHit?: (topFraction: number | null) => void;
 };
 
 type RenderedMark = {
@@ -108,6 +114,8 @@ export default function PdfPage({
   onMarkClick,
   onNoteClick,
   onRegionDraw,
+  searchHit = null,
+  onSearchHit,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -116,6 +124,9 @@ export default function PdfPage({
   // the mark layer re-derives its rects once the text layer is ready.
   const [index, setIndex] = useState<PageTextIndex | null>(null);
   const [marks, setMarks] = useState<RenderedMark[]>([]);
+  // Rects of the current search match on this page (issue #16), painted as a
+  // transient focus band. Derived like marks, but from the incoming `searchHit`.
+  const [searchRects, setSearchRects] = useState<MarkRect[]>([]);
   // The page's rendered CSS size, so region boxes (stored normalized) can be
   // mapped to pixels and a fresh drag normalized back.
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -246,6 +257,38 @@ export default function PdfPage({
     }
     setMarks(out);
   }, [index, annotations]);
+
+  // Resolve the search match (issue #16) to rects on this page, and report its
+  // top as a page-height fraction so the parent can reveal the band it sits in.
+  // Reuses the same anchor→range→coalesce path as marks; the anchor's stored
+  // quote re-locates the run if extraction offsets ever drift from the layer.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || !index || !searchHit) {
+      setSearchRects([]);
+      return;
+    }
+    const range = anchorToRange(index, searchHit);
+    if (!range) {
+      setSearchRects([]);
+      onSearchHit?.(null);
+      return;
+    }
+    const origin = wrap.getBoundingClientRect();
+    const rects = coalesceLineRects(
+      [...range.getClientRects()]
+        .filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => ({
+          left: r.left - origin.left,
+          top: r.top - origin.top,
+          width: r.width,
+          height: r.height,
+        })),
+    );
+    setSearchRects(rects);
+    if (rects.length && size.h) onSearchHit?.(Math.min(...rects.map((r) => r.top)) / size.h);
+    else onSearchHit?.(null);
+  }, [index, searchHit, size.h, onSearchHit]);
 
   // Handle pointer-up on the (top, transparent) text layer. A drag ends here
   // with a live selection → report it for the mark menu. A plain click with no
@@ -419,6 +462,20 @@ export default function PdfPage({
           )),
         )}
       </div>
+      {/* Transient search-match highlight (issue #16), painted like a mark (under
+          the text layer, click-through) but in a distinct focus style that pulses
+          in, so a jumped-to result is unmistakable without blocking selection. */}
+      {searchRects.length > 0 && (
+        <div className="searchLayer" aria-hidden>
+          {searchRects.map((r, i) => (
+            <div
+              key={i}
+              className="searchHit"
+              style={{ left: r.left, top: r.top, width: r.width, height: r.height }}
+            />
+          ))}
+        </div>
+      )}
       {/* Persisted region-box highlights (issue #12), painted under the drawing
           surface so a scanned page reads like a marked-up page. */}
       {regionMode && (

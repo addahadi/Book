@@ -25,6 +25,10 @@ type ReaderState = {
   // measures the page, which then snaps `pageOffset` to the nearest band top.
   restorePosition: (page: number, offset: number) => void;
   goToPage: (page: number) => void;
+  // Land at a specific in-page offset without changing the page — used to reveal
+  // the band a jumped-to search match (issue #16) sits in. A later resize's
+  // setBandTops still snaps this to the nearest band top.
+  setPageOffset: (offset: number) => void;
   nextPage: () => void;
   prevPage: () => void;
 };
@@ -62,6 +66,7 @@ export const useReader = create<ReaderState>((set, get) => ({
     const clamped = Math.max(1, numPages ? Math.min(page, numPages) : page);
     set({ currentPage: clamped, pageOffset: 0, bandTops: [0] });
   },
+  setPageOffset: (offset) => set({ pageOffset: Math.max(0, offset) }),
   // Turning steps through the current page's bands, rolling over to the next /
   // previous page at the edges. Clamped at the first band of page 1 and the last
   // band of the last page.

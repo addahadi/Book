@@ -137,6 +137,39 @@ body {
 }
 
 /*
+ * Search-match highlight (issue #16) — a transient focus band over a jumped-to
+ * result. Sits with the mark layer UNDER the text layer (click-through) so it
+ * never blocks selection. A ring + warm wash sets it apart from user highlights,
+ * and it pulses once on appear to draw the eye. Not `.pdf-page`, so night mode's
+ * invert leaves the colour true.
+ */
+.searchLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.searchHit {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(250, 204, 21, 0.45);
+  box-shadow: 0 0 0 1.5px rgba(202, 138, 4, 0.9);
+  animation: searchHitPulse 1.1s ease-out 1;
+}
+
+@keyframes searchHitPulse {
+  0% {
+    background: rgba(251, 146, 60, 0.8);
+    box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.9);
+  }
+  100% {
+    background: rgba(250, 204, 21, 0.45);
+    box-shadow: 0 0 0 1.5px rgba(202, 138, 4, 0.9);
+  }
+}
+
+/*
  * Margin note flags (issue #10). The layer sits ABOVE the text layer so a flag
  * is clickable, but is itself click-through — only the flags opt back into
  * pointer events. Flags are pinned to the page's right margin, so they rarely
