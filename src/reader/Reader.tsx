@@ -224,9 +224,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   // whether the pointer is resting on the chrome, which pins it visible.
   const [focusMode, setFocusMode] = useState(false);
   const [chromeHover, setChromeHover] = useState(false);
-  // A manual lock (issue #18) that pins both toolbars visible, overriding the
-  // idle auto-fade — for when the reader wants the chrome to stay put.
-  const [chromePinned, setChromePinned] = useState(false);
+  // A manual hide (issue #18) that folds both toolbars away on demand,
+  // overriding the auto-fade — for when the reader wants the chrome gone now
+  // rather than after the idle timer. The restore chevron brings it back.
+  const [chromeHidden, setChromeHidden] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const onSelect = useCallback((selection: Selection | null) => {
@@ -501,7 +502,6 @@ export default function Reader({ bookId }: { bookId: string }) {
   // Auto-fading chrome (issue #18). Pin it visible while any panel/menu is open
   // or the pointer rests on the toolbars, so it never fades from under a control.
   const chromeLocked =
-    chromePinned ||
     tocOpen ||
     searchOpen ||
     notebookOpen ||
@@ -509,7 +509,15 @@ export default function Reader({ bookId }: { bookId: string }) {
     !!pendingSel ||
     !!pendingRemove ||
     !!editingNote;
-  const { visible: chromeVisible, poke: pokeChrome } = useChromeFade(chromeLocked);
+  const { visible: autoChromeVisible, poke: pokeChrome } = useChromeFade(chromeLocked);
+  // A manual hide wins over everything (and over the auto-fade). Once folded
+  // away, ordinary interaction won't summon the chrome back — only the restore
+  // chevron does — so an immersive hide actually stays hidden.
+  const chromeVisible = chromeHidden ? false : autoChromeVisible;
+  const restoreChrome = useCallback(() => {
+    setChromeHidden(false);
+    pokeChrome();
+  }, [pokeChrome]);
 
   // Focus Mode (issue #18): one gesture into fullscreen with panels collapsed and
   // margins dimmed. Fullscreen may be refused (permissions, an unsupported
@@ -786,17 +794,10 @@ export default function Reader({ bookId }: { bookId: string }) {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setChromePinned((p) => !p)}
-            aria-pressed={chromePinned}
-            aria-label={chromePinned ? 'Unlock toolbars' : 'Lock toolbars visible'}
-            title={
-              chromePinned
-                ? 'Toolbars locked open — click to let them auto-hide'
-                : 'Lock toolbars open — stop them auto-hiding'
-            }
-            className={`rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5 ${
-              chromePinned ? 'bg-black/5 dark:bg-white/10' : ''
-            }`}
+            onClick={() => setChromeHidden(true)}
+            aria-label="Hide toolbars"
+            title="Hide toolbars — fold the top and bottom bars away"
+            className="rounded px-2 py-1 ring-1 ring-black/10 hover:bg-black/5 dark:ring-white/10 dark:hover:bg-white/5"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="block">
               <rect
@@ -809,23 +810,13 @@ export default function Reader({ bookId }: { bookId: string }) {
                 stroke="currentColor"
                 strokeWidth="1.3"
               />
-              {chromePinned ? (
-                <path
-                  d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              ) : (
-                <path
-                  d="M5.5 7V5a2.5 2.5 0 0 1 5 0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                />
-              )}
+              <path
+                d="M5.5 7V5a2.5 2.5 0 0 1 5 0"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
           <button
@@ -948,8 +939,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       {!chromeVisible && (
         <button
           type="button"
-          onClick={pokeChrome}
-          onPointerEnter={pokeChrome}
+          onClick={restoreChrome}
           aria-label="Show toolbar"
           className="fixed left-1/2 top-1.5 z-30 flex -translate-x-1/2 items-center justify-center rounded-full px-3 py-0.5 text-neutral-500 opacity-30 transition-opacity hover:opacity-90 dark:text-neutral-400"
         >
