@@ -12,7 +12,13 @@ import { useOutline } from './useOutline';
 import { useBookSearch } from './search';
 import { useChromeFade } from './useChromeFade';
 import { usePageCache } from './prefetch';
-import { getBook, reconcileTextLayer, saveBookPosition } from '../db/library';
+import {
+  estimateTextColumn,
+  getBook,
+  reconcileTextLayer,
+  saveBookPosition,
+  type TextColumn,
+} from '../db/library';
 import {
   addAnnotation,
   listAnnotations,
@@ -46,6 +52,10 @@ const EDGE_ZONE = 0.22;
 const MAX_PAGE_WIDTH = 1000;
 // Horizontal breathing room around the page column, in px (total of both sides).
 const H_GUTTER = 32;
+// Only crop the page's blank side margins below this viewport width (px). It's a
+// narrow-screen readability fix; on a roomy desktop the whole page (margins and
+// all) reads like a book and text is already legible, so leave it be.
+const CROP_MAX_WIDTH = 760;
 // Geometric fallback step, as a fraction of viewport height: the slide used when
 // line-packing can't advance (a scanned page with no line boxes, or a line /
 // figure gap taller than the viewport). The 1 − 0.12 keeps a 12% strip repeating
@@ -140,6 +150,10 @@ export default function Reader({ bookId }: { bookId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 }); // the clipped reading viewport
   const [pageHeight, setPageHeight] = useState(0); // rendered page CSS height
+  // The book's text-column extent (page-width fractions), estimated once per
+  // document, used to crop blank side margins on a narrow screen. Null until
+  // measured, or when there's nothing worth cropping (scanned/empty book).
+  const [textColumn, setTextColumn] = useState<TextColumn | null>(null);
   const [lines, setLines] = useState<LineBox[]>([]); // page line boxes (#20)
   // True once this book's saved position has been restored. Gates the persist
   // effect so we never write the pre-restore default back over the saved spot.
@@ -602,6 +616,22 @@ export default function Reader({ bookId }: { bookId: string }) {
     };
   }, [doc, hasTextLayer, bookId]);
 
+  // Estimate the text-column extent once per document, so a narrow screen can
+  // crop the blank side margins and enlarge text (which also re-engages banding).
+  // Scanned books (no text layer) are left uncropped. Resets between books so a
+  // stale column is never applied to the next one.
+  useEffect(() => {
+    setTextColumn(null);
+    if (!doc || !hasTextLayer) return;
+    let cancelled = false;
+    estimateTextColumn(doc)
+      .then((c) => !cancelled && setTextColumn(c))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, hasTextLayer]);
+
   // Persist the reading position for auto-resume (issue #07). Debounced so
   // band-by-band turning doesn't hammer IndexedDB, and gated on `resumed` so it
   // only writes after the saved position has been restored for this book.
@@ -636,7 +666,25 @@ export default function Reader({ bookId }: { bookId: string }) {
     return () => ro.disconnect();
   }, []);
 
-  const width = Math.min(Math.max(box.w - H_GUTTER, 0), MAX_PAGE_WIDTH);
+  // Fit the text column — not the whole sheet — to the screen on a narrow
+  // viewport: render the page wider so the column fills the available width, and
+  // translate to recentre it, letting the clip hide the blank margins. The
+  // MAX_PAGE_WIDTH cap now bounds the *column* width (a comfortable measure);
+  // renderWidth is derived from it and left unclamped. Guards skip the crop for a
+  // near-full-width column (a wide figure page) or an implausibly narrow one.
+  const availWidth = Math.min(Math.max(box.w - H_GUTTER, 0), MAX_PAGE_WIDTH);
+  const columnW = textColumn ? textColumn.rightFrac - textColumn.leftFrac : 1;
+  const cropActive =
+    hasTextLayer &&
+    box.w > 0 &&
+    box.w < CROP_MAX_WIDTH &&
+    !!textColumn &&
+    columnW >= 0.2 &&
+    columnW <= 0.9;
+  const width = cropActive ? availWidth / columnW : availWidth;
+  const cropTx = cropActive
+    ? (0.5 - (textColumn!.leftFrac + textColumn!.rightFrac) / 2) * width
+    : 0;
 
   // The render layer reports the page's height and its line boxes together once
   // drawn. Guard the height against sub-pixel jitter so we don't rerun the band
@@ -1033,7 +1081,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                   ? 'ease-out motion-safe:transition-transform motion-safe:duration-200'
                   : 'ease-out'
               }
-              style={{ width, transform: `translateY(${-shift}px)` }}
+              style={{ width, transform: `translateX(${cropTx}px) translateY(${-shift}px)` }}
             >
               <PdfPage
                 doc={doc}
