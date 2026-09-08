@@ -153,6 +153,17 @@ body {
 }
 
 /*
+ * On a narrow screen the margin-cropped page fills the width, so there are no
+ * gutters to dim — the vignette would only darken the outer text. Drop the ring
+ * there; focus mode on mobile folds the toolbars away for immersion instead.
+ */
+@media (max-width: 760px) {
+  .focusVignette {
+    background: none;
+  }
+}
+
+/*
  * Search-match highlight (issue #16) — a transient focus band over a jumped-to
  * result. Sits with the mark layer UNDER the text layer (click-through) so it
  * never blocks selection. A ring + warm wash sets it apart from user highlights,

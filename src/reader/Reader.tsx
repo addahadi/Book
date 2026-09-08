@@ -558,11 +558,16 @@ export default function Reader({ bookId }: { bookId: string }) {
     setSearchOpen(false);
     setNotebookOpen(false);
     rootRef.current?.requestFullscreen?.().catch(() => {});
+    // On a phone there's no fullscreen (iOS Safari) and no margins to dim, so
+    // make focus mode mean something by folding the toolbars away for an
+    // immersive full-bleed page; the restore chevron brings them back.
+    if (window.matchMedia?.('(max-width: 760px)').matches) setChromeHidden(true);
     setFocusMode(true);
   }, []);
 
   const exitFocus = useCallback(() => {
     setFocusMode(false);
+    setChromeHidden(false); // unfold the toolbars folded away on entering focus
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   }, []);
 
