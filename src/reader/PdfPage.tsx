@@ -62,6 +62,10 @@ type Props = {
   /** Scanned-PDF fallback (issue #12): no text layer, so text selection is off
       and dragging on the page draws a region-box highlight instead. */
   regionMode?: boolean;
+  /** True while the page is pinch-zoomed. Selection / mark hit-testing / region
+      drawing are turned off so a one-finger drag pans the page (the parent owns
+      the pan), and the transient CSS scale can't skew wrapper-relative math. */
+  zoomed?: boolean;
   /** Reports the page's rendered CSS height and its visual line boxes (CSS px
       from the page top) once drawn, so the parent can pack line-aware bands
       (issue #20). `lines` is empty for a scanned page (no text layer). */
@@ -109,6 +113,7 @@ export default function PdfPage({
   cache,
   annotations,
   regionMode = false,
+  zoomed = false,
   onMeasure,
   onSelect,
   onMarkClick,
@@ -536,14 +541,22 @@ export default function PdfPage({
       <div
         ref={textRef}
         className="textLayer"
-        onPointerDown={regionMode ? onRegionPointerDown : undefined}
-        onPointerMove={regionMode ? onRegionPointerMove : undefined}
-        onPointerUp={regionMode ? onRegionPointerUp : undefined}
+        onPointerDown={regionMode && !zoomed ? onRegionPointerDown : undefined}
+        onPointerMove={regionMode && !zoomed ? onRegionPointerMove : undefined}
+        onPointerUp={regionMode && !zoomed ? onRegionPointerUp : undefined}
         // Keep a region drag on a touch device from bubbling to the surface's
         // swipe handler (which would turn the page mid-draw).
-        onTouchStart={regionMode ? (e) => e.stopPropagation() : undefined}
-        onTouchEnd={regionMode ? (e) => e.stopPropagation() : undefined}
-        style={regionMode ? { cursor: 'crosshair', userSelect: 'none', touchAction: 'none' } : undefined}
+        onTouchStart={regionMode && !zoomed ? (e) => e.stopPropagation() : undefined}
+        onTouchEnd={regionMode && !zoomed ? (e) => e.stopPropagation() : undefined}
+        // While zoomed, opt the layer out of pointer events entirely so touches
+        // reach the surface's pan handler and no selection/hit-test fires.
+        style={
+          zoomed
+            ? { pointerEvents: 'none', userSelect: 'none' }
+            : regionMode
+              ? { cursor: 'crosshair', userSelect: 'none', touchAction: 'none' }
+              : undefined
+        }
       />
       {/* Margin note flags (issue #10), above the text layer so they're clickable.
           The container is click-through; only the flags catch pointer events, and

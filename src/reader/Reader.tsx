@@ -47,6 +47,14 @@ const TAP_MOVE = 10;
 // Width of the left / right edge-tap zones, as a fraction of the surface — a tap
 // here turns the page (SPEC §6.1: "click/tap page edges"). The middle is inert.
 const EDGE_ZONE = 0.22;
+// Ceiling for the pinch-zoom escape hatch (issue: mobile readability). Zoom is a
+// transient view on top of the durable position — the page never scrolls, it's
+// magnified in place and panned, and a reset returns to the banded page.
+const MAX_ZOOM = 4;
+
+// Distance between two active touch points, for pinch tracking.
+const touchGap = (a: React.Touch, b: React.Touch) =>
+  Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 // Widest a single page column is drawn, even on large screens, so text keeps a
 // comfortable measure instead of ballooning; the page centres in extra space.
 const MAX_PAGE_WIDTH = 1000;
@@ -168,6 +176,17 @@ export default function Reader({ bookId }: { bookId: string }) {
   // its own menu this cycle, so the same tap doesn't also turn the page.
   const surfaceDown = useRef<{ x: number; y: number } | null>(null);
   const actedRef = useRef(false);
+  // Pinch-zoom / pan (the readability escape hatch). `view` is transient: it
+  // magnifies the page in place and never touches the durable (currentPage,
+  // pageOffset) position, so a reset — or turning a page — returns to the exact
+  // band. `zoomed` gates page turns and in-page annotation off while magnified.
+  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+  // True during an active pinch, so we can claim the touch (touch-action: none)
+  // before zoom passes 1 and stop the browser's own pinch-zoom from competing.
+  const [pinching, setPinching] = useState(false);
+  const zoomed = view.zoom > 1.001;
+  const pinchRef = useRef<{ startGap: number; startZoom: number } | null>(null);
+  const panRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   // Latest position + resume flag, mirrored into refs so the leave-book flush
   // can read them without re-subscribing on every turn.
   const posRef = useRef({ currentPage, pageOffset, resumed });
@@ -443,6 +462,7 @@ export default function Reader({ bookId }: { bookId: string }) {
     setPendingSel(null);
     setPendingRemove(null);
     setEditingNote(null);
+    setView({ zoom: 1, panX: 0, panY: 0 }); // a turn always lands on an unzoomed page
   }, [currentPage, pageOffset]);
 
   // Land on the band holding a jumped-to search match (issue #16) once the page's
@@ -790,10 +810,11 @@ export default function Reader({ bookId }: { bookId: string }) {
   // completed (that pointerup opens the mark menu) or when a mark tap already
   // opened its own menu this cycle.
   const onSurfacePointerUp = (e: React.PointerEvent) => {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     const down = surfaceDown.current;
     surfaceDown.current = null;
+    if (zoomed) return; // a pan gesture, not a tap/turn
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
 
     // An open menu: a tap anywhere dismisses it (and does nothing else).
     if (pendingSel || pendingRemove || editingNote) {
@@ -814,22 +835,63 @@ export default function Reader({ bookId }: { bookId: string }) {
     else if (frac >= 1 - EDGE_ZONE) nextPage();
   };
 
-  // Swipe left/right on touch devices. Disambiguated from the other one-finger
-  // gestures that share this surface: a text-selection drag (which must be left
-  // to the mark menu, not eaten as a turn), a vertical drag, and a slow
-  // long-press. A two-finger touch is never a swipe (reserved for pinch-zoom).
+  // Touch gestures on the reading surface, disambiguated by finger count and
+  // intent: two fingers pinch-zoom; one finger while zoomed pans; one finger
+  // otherwise is a swipe (a page turn) — but only when it isn't a text-selection
+  // drag, a vertical drag, or a slow long-press.
   const onTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length >= 2) {
-      touchStart.current = null; // multitouch — not a swipe candidate
+      touchStart.current = null;
+      panRef.current = null;
+      pinchRef.current = { startGap: touchGap(e.touches[0], e.touches[1]), startZoom: view.zoom };
+      setPinching(true);
       return;
     }
     const t = e.touches[0];
+    if (zoomed) {
+      // One finger on a magnified page → pan it (no page turn while zoomed).
+      touchStart.current = null;
+      panRef.current = t ? { x: t.clientX, y: t.clientY, panX: view.panX, panY: view.panY } : null;
+      return;
+    }
+    panRef.current = null;
     touchStart.current = t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
   };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    // Pinch → set zoom (scaled about the viewport centre; pan unchanged).
+    if (pinchRef.current && e.touches.length >= 2) {
+      const p = pinchRef.current;
+      const gap = touchGap(e.touches[0], e.touches[1]);
+      const zoom = Math.min(MAX_ZOOM, Math.max(1, p.startZoom * (gap / (p.startGap || 1))));
+      setView((v) => ({ ...v, zoom }));
+      return;
+    }
+    // Drag while magnified → pan.
+    if (panRef.current && e.touches.length === 1) {
+      const t = e.touches[0];
+      const pr = panRef.current;
+      setView((v) => ({ ...v, panX: pr.panX + (t.clientX - pr.x), panY: pr.panY + (t.clientY - pr.y) }));
+    }
+  };
+
   const onTouchEnd = (e: React.TouchEvent) => {
+    // Settling a pinch: snap fully back to the banded page if zoomed nearly out.
+    if (pinchRef.current) {
+      if (e.touches.length < 2) {
+        pinchRef.current = null;
+        setPinching(false);
+      }
+      setView((v) => (v.zoom <= 1.02 ? { zoom: 1, panX: 0, panY: 0 } : v));
+      return;
+    }
+    if (panRef.current) {
+      if (e.touches.length === 0) panRef.current = null;
+      return;
+    }
     const start = touchStart.current;
     touchStart.current = null;
-    if (!start) return;
+    if (!start || zoomed) return;
     // A completed selection isn't a swipe — leave the text under the mark menu.
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
@@ -1071,6 +1133,7 @@ export default function Reader({ bookId }: { bookId: string }) {
         onPointerUp={onSurfacePointerUp}
         onContextMenu={(e) => e.preventDefault()}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         className="relative flex-1 select-none overflow-hidden"
       >
@@ -1081,7 +1144,20 @@ export default function Reader({ bookId }: { bookId: string }) {
         ) : (
           // The clip is the viewport; the inner column is the fit-width page,
           // slid up by `shift` to show the current band.
-          <div ref={clipRef} className="absolute inset-0 flex items-start justify-center overflow-hidden">
+          <div
+            ref={clipRef}
+            className="absolute inset-0 flex items-start justify-center overflow-hidden"
+            style={{
+              // Pinch-zoom lives here: scale about the viewport centre and pan,
+              // leaving the inner band transform (crop + shift) untouched. At
+              // zoom 1 / no pan this is identity. touch-action is claimed only
+              // while pinching or zoomed, so at rest native text selection is
+              // unaffected.
+              transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
+              transformOrigin: 'center center',
+              touchAction: zoomed || pinching ? 'none' : undefined,
+            }}
+          >
             <div
               className={
                 samePage
@@ -1097,6 +1173,7 @@ export default function Reader({ bookId }: { bookId: string }) {
                 cache={cache}
                 annotations={pageAnnotations}
                 regionMode={!hasTextLayer}
+                zoomed={zoomed}
                 searchHit={searchHit && searchHit.page === currentPage ? searchHit.anchor : null}
                 onSearchHit={onSearchHit}
                 onMeasure={onMeasure}
@@ -1112,6 +1189,20 @@ export default function Reader({ bookId }: { bookId: string }) {
             gutters around the centred page while leaving the page itself clear.
             Click-through, so selection and turning still work underneath. */}
         <div className={`focusVignette ${focusMode ? 'opacity-100' : 'opacity-0'}`} aria-hidden />
+        {/* Reset the pinch-zoom back to the banded page. Shown only while
+            magnified; stops its own pointer/touch so it isn't read as a pan. */}
+        {zoomed && (
+          <button
+            type="button"
+            onClick={() => setView({ zoom: 1, panX: 0, panY: 0 })}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            aria-label="Reset zoom"
+            className="absolute bottom-4 right-4 z-20 rounded-full bg-black/70 px-3 py-2 text-sm font-medium text-white shadow-lg backdrop-blur dark:bg-white/20"
+          >
+            {Math.round(view.zoom * 10) / 10}× · Reset
+          </button>
+        )}
       </main>
       {pendingSel && (
         <SelectionMenu
