@@ -1039,6 +1039,7 @@ export default function Reader({ bookId }: { bookId: string }) {
       {tocOpen && (
         <TocPanel
           outline={outline}
+          bookmarks={bookmarks}
           currentPage={currentPage}
           onJump={(page) => {
             goToPage(page);
