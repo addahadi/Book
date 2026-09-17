@@ -10,9 +10,14 @@ closer to a physical book.
 
 > **Live demo:** _add your Vercel URL here once deployed_
 
-<!-- Add a screenshot or GIF here — it does more than any paragraph.
-     Drop images in docs/ and reference them, e.g.:
-     ![Folio](docs/screenshot-reader.png) -->
+<table>
+  <tr>
+    <td width="50%"><img src="docs/landing-light.jpg" alt="Folio landing page in light mode" /></td>
+    <td width="50%"><img src="docs/landing-dark.jpg" alt="Folio landing page in warm night mode" /></td>
+  </tr>
+</table>
+
+<sub>The landing page in light and warm night mode.</sub>
 
 ---
 
