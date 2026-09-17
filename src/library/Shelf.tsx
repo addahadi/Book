@@ -89,7 +89,7 @@ export default function Shelf() {
   return (
     <div className="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100">
       <header className="flex items-center justify-between border-b border-black/10 px-4 py-2 text-sm dark:border-white/10">
-        <span className="font-semibold">Reading Stage</span>
+        <span className="font-semibold">Folio</span>
         <button
           type="button"
           onClick={toggleTheme}

@@ -1,4 +1,4 @@
-// Domain model for Reading Stage. See SPEC.md §8.
+// Domain model for Folio. See SPEC.md §8.
 // The PDF file is never rewritten; annotations live in a sidecar keyed by bookId.
 
 export type Book = {

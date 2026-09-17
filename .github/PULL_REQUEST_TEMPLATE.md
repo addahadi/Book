@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to Reading Stage! -->
+<!-- Thanks for contributing to Folio! -->
 
 ## What this does
 

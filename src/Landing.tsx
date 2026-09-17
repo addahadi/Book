@@ -1,8 +1,8 @@
 import { useTheme } from './store/theme';
 
-const REPO_URL = 'https://github.com/addahadi/Book';
+const REPO_URL = 'https://github.com/addahadi/Folio';
 
-// First-visit explainer. Reading Stage's home is the shelf, so this is the pitch
+// First-visit explainer. Folio's home is the shelf, so this is the pitch
 // a newcomer lands on before entering the library; it's dismissed for good once
 // they click through (App remembers via localStorage).
 const DEFICITS = [
@@ -30,7 +30,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
   return (
     <div className="h-full overflow-y-auto bg-neutral-100 text-neutral-900 dark:bg-stone-900 dark:text-stone-100">
       <header className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-4 text-sm">
-        <span className="font-semibold">Reading Stage</span>
+        <span className="font-semibold">Folio</span>
         <div className="flex items-center gap-2">
           <a
             href={REPO_URL}
@@ -60,7 +60,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
             Digital reading that feels closer to a book.
           </h1>
           <p className="mt-5 max-w-xl text-base text-neutral-600 dark:text-neutral-300 sm:text-lg">
-            Reading Stage is a reading-first PDF experience for the web — built around{' '}
+            Folio is a reading-first PDF experience for the web — built around{' '}
             <span className="font-medium text-neutral-900 dark:text-neutral-100">annotation</span> and a{' '}
             <span className="font-medium text-neutral-900 dark:text-neutral-100">sense of place</span>.
             Not an editor, not a PDF toolkit. A paginated reader for serious, re-read-heavy material.
@@ -113,7 +113,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
           <h2 className="text-lg font-semibold">Yours, and only yours</h2>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600 dark:text-neutral-300">
             Your books and every note you make live entirely in this browser, on this device. There
-            is no backend, no account, and no tracking — and because Reading Stage is open source,
+            is no backend, no account, and no tracking — and because Folio is open source,
             that&apos;s something you can verify, not just take on trust. Export your annotations to a
             file anytime as a backup.
           </p>

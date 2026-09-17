@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Reading Stage** — a reading-first PDF experience for the web. Not an editor, not a PDF
-toolkit: a paginated reader built around **annotation** and **sense of place**, meant to make
+**Folio** (formerly "Reading Stage") — a reading-first PDF experience for the web. Not an editor,
+not a PDF toolkit: a paginated reader built around **annotation** and **sense of place**, meant to make
 digital reading feel closer to a physical book. v1 is fully local (no backend, no accounts).
 
 `SPEC.md` is the source of truth for product decisions — read it before making design calls.

@@ -1,4 +1,4 @@
-# Reading Stage — Product & Build Spec
+# Folio — Product & Build Spec
 
 > A reading-first PDF experience for the web. Not an editor, not a competitor —
 > a serious, shippable reader that makes digital reading feel closer to a physical book,

@@ -1,4 +1,4 @@
-# Reading Stage
+# Folio
 
 **A reading-first PDF experience for the web.** Not an editor, not a PDF toolkit — a paginated
 reader built around **annotation** and **sense of place**, meant to make digital reading feel
@@ -12,13 +12,13 @@ closer to a physical book.
 
 <!-- Add a screenshot or GIF here — it does more than any paragraph.
      Drop images in docs/ and reference them, e.g.:
-     ![Reading Stage](docs/screenshot-reader.png) -->
+     ![Folio](docs/screenshot-reader.png) -->
 
 ---
 
 ## Why
 
-Physical books beat digital ones for *thinking*, not for *looking*. Reading Stage doesn't fake
+Physical books beat digital ones for *thinking*, not for *looking*. Folio doesn't fake
 paper — it closes the specific deficits that make PDF reading worse than paper for a serious
 reader, in priority order:
 
@@ -108,7 +108,7 @@ open an issue to discuss scope before building something new.
 
 Licensed under the **GNU Affero General Public License v3.0** — see [`LICENSE`](./LICENSE).
 
-The AGPL keeps Reading Stage open: anyone may use, study, modify, and share it, and anyone who
+The AGPL keeps Folio open: anyone may use, study, modify, and share it, and anyone who
 runs a modified version as a network service must publish their changes under the same license.
 
 ## Acknowledgements

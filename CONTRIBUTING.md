@@ -1,6 +1,6 @@
-# Contributing to Reading Stage
+# Contributing to Folio
 
-Thanks for your interest in Reading Stage. It's a reading-first PDF reader that values **focus by
+Thanks for your interest in Folio. It's a reading-first PDF reader that values **focus by
 subtraction** — so the most important thing to know up front is that *what we deliberately don't
 build* is as considered as what we do. A quick read of [`SPEC.md`](./SPEC.md) (especially the
 **non-goals in §3**) will save everyone time.
@@ -19,8 +19,8 @@ build* is as considered as what we do. A quick read of [`SPEC.md`](./SPEC.md) (e
 ## Development setup
 
 ```bash
-git clone https://github.com/addahadi/Book.git
-cd Book
+git clone https://github.com/addahadi/Folio.git
+cd Folio
 npm install
 npm run dev
 ```

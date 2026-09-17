@@ -1,12 +1,12 @@
 ---
 name: Feature request
-about: Suggest an idea for Reading Stage
+about: Suggest an idea for Folio
 title: ''
 labels: enhancement
 assignees: ''
 ---
 
-> Reading Stage is scoped by **subtraction** — please skim the non-goals in `SPEC.md` §3 first.
+> Folio is scoped by **subtraction** — please skim the non-goals in `SPEC.md` §3 first.
 > Ideas are most welcome when they're framed as a reading problem, not just a feature.
 
 **The reading problem**
