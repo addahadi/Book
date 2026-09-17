@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "A reading-first PDF experience for the web. Annotation + sense of place.",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
